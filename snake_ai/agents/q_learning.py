@@ -84,16 +84,26 @@ def encode_state(state: GameState) -> EncodedState:
 
 
 def _danger(state: GameState, action: Action) -> bool:
+    return danger_at_distance(state, action, distance=1)
+
+
+def danger_at_distance(state: GameState, action: Action, *, distance: int) -> bool:
+    """Return whether a relative-direction cell is currently blocked."""
+    if distance < 1:
+        raise ValueError("distance must be at least 1")
     direction = Direction(
         (int(state.direction) + _ACTION_TURNS[action]) % len(Direction)
     )
     dx, dy = _DIRECTION_VECTORS[direction]
-    new_head = (state.head[0] + dx, state.head[1] + dy)
+    new_head = (state.head[0] + dx * distance, state.head[1] + dy * distance)
     x, y = new_head
     if x < 0 or x >= state.width or y < 0 or y >= state.height:
         return True
-    growing = new_head == state.food
-    body = state.snake if growing else state.snake[:-1]
+    growing = distance == 1 and new_head == state.food
+    if distance > 1:
+        body = state.snake[1:]
+    else:
+        body = state.snake if growing else state.snake[:-1]
     return new_head in body
 
 
@@ -108,6 +118,7 @@ class QLearningAgent:
         epsilon: float = 1.0,
         epsilon_min: float = 0.05,
         epsilon_decay: float = 0.995,
+        state_count: int = STATE_COUNT,
         seed: int | None = None,
     ) -> None:
         for name, value in (
@@ -121,14 +132,17 @@ class QLearningAgent:
                 raise ValueError(f"{name} must be between 0 and 1")
         if epsilon_min > epsilon:
             raise ValueError("epsilon_min cannot exceed epsilon")
+        if state_count < 1:
+            raise ValueError("state_count must be at least 1")
 
         self.learning_rate = learning_rate
         self.discount = discount
         self.epsilon = epsilon
         self.epsilon_min = epsilon_min
         self.epsilon_decay = epsilon_decay
+        self.state_count = state_count
         self.q_table = [
-            [0.0 for _ in range(ACTION_COUNT)] for _ in range(STATE_COUNT)
+            [0.0 for _ in range(ACTION_COUNT)] for _ in range(state_count)
         ]
         self.last_update: QLearningUpdate | None = None
         self._rng = random.Random(seed)

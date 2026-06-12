@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, deque
 import random
+from typing import Callable
 
 from snake_ai.agents.manual_agent import action_for_direction
-from snake_ai.agents.q_learning import QLearningAgent, encode_state
-from snake_ai.game import Action, Direction, SnakeGame
+from snake_ai.agents.q_learning import EncodedState, QLearningAgent, encode_state
+from snake_ai.agents.q_learning_two_step import (
+    TwoStepDangerQLearningAgent,
+    encode_two_step_state,
+)
+from snake_ai.game import Action, Direction, GameState, SnakeGame
 from snake_ai.visualization.snapshot import DashboardSnapshot
 
-SPEEDS = (1, 5, 10, 50, 100, 500)
-MODES = ("manual", "random", "q-learning")
+SPEEDS = (1, 5, 10, 50, 100, 500, 1000, 5000)
+MODES = ("manual", "random", "q-learning", "q-learning-2step")
 
 
 class DashboardController:
@@ -38,14 +43,20 @@ class DashboardController:
         self.speed = 1
         self._pending_manual_action = Action.STRAIGHT
         self._action_counts: Counter[Action] = Counter()
+        self._recent_snake_lengths: deque[int] = deque(maxlen=50)
+        self._max_snake_length = len(self.game.state.snake)
         self.q_agent = QLearningAgent(seed=seed)
+        self.two_step_q_agent = TwoStepDangerQLearningAgent(seed=seed)
 
     @property
     def snapshot(self) -> DashboardSnapshot:
-        metrics = self._learning_metrics()
-        agent_name = "Q-Learning" if self.mode == "q-learning" else self.mode.title()
-        learning_view = (
-            "Tabular Q-learning" if self.mode == "q-learning" else "Baseline agent"
+        metrics, q_values = self._learning_telemetry()
+        names = {
+            "q-learning": ("Q-Learning", "Tabular Q-learning"),
+            "q-learning-2step": ("Q-Learning 2-Step", "14-bit two-step danger"),
+        }
+        agent_name, learning_view = names.get(
+            self.mode, (self.mode.title(), "Baseline agent")
         )
         return DashboardSnapshot(
             game_state=self.game.state,
@@ -56,6 +67,9 @@ class DashboardController:
             action=self.action,
             paused=self.paused,
             speed=self.speed,
+            max_snake_length=self._max_snake_length,
+            average_snake_length_50=self._average_snake_length_50,
+            q_values=q_values,
             metrics=metrics,
         )
 
@@ -83,7 +97,10 @@ class DashboardController:
         self.action = None
         self.paused = True
         self._action_counts.clear()
+        self._recent_snake_lengths.clear()
+        self._max_snake_length = len(self.game.state.snake)
         self.q_agent = QLearningAgent(seed=self._seed)
+        self.two_step_q_agent = TwoStepDangerQLearningAgent(seed=self._seed)
 
     def request_direction(self, direction: Direction) -> None:
         action = action_for_direction(self.game.state.direction, direction)
@@ -102,20 +119,21 @@ class DashboardController:
         if self.game.state.done:
             self._next_episode()
 
-        encoded = encode_state(self.game.state)
+        q_agent, encoder = self._active_q_learning()
+        encoded = encoder(self.game.state) if encoder is not None else None
         exploratory = False
         if self.mode == "manual":
             action = self._pending_manual_action
             self._pending_manual_action = Action.STRAIGHT
-        elif self.mode == "q-learning":
-            action, exploratory = self.q_agent.choose_action(encoded.state_id)
+        elif q_agent is not None and encoded is not None:
+            action, exploratory = q_agent.choose_action(encoded.state_id)
         else:
             action = self._rng.choice(tuple(Action))
 
         next_state, self.reward, done, _ = self.game.step(action)
-        if self.mode == "q-learning":
-            next_encoded = encode_state(next_state)
-            self.q_agent.update(
+        if q_agent is not None and encoder is not None and encoded is not None:
+            next_encoded = encoder(next_state)
+            q_agent.update(
                 encoded.state_id,
                 action,
                 self.reward,
@@ -125,37 +143,45 @@ class DashboardController:
             )
         self.action = action
         self._action_counts[action] += 1
+        self._max_snake_length = max(self._max_snake_length, len(next_state.snake))
+        if done:
+            self._recent_snake_lengths.append(len(next_state.snake))
         if done and self.mode == "manual":
             self.paused = True
 
     def _next_episode(self) -> None:
-        if self.mode == "q-learning":
-            self.q_agent.finish_episode()
+        q_agent, _ = self._active_q_learning()
+        if q_agent is not None:
+            q_agent.finish_episode()
         self.episode += 1
         self.game.reset()
         self.reward = 0.0
         self.action = None
 
-    def _learning_metrics(self) -> dict[str, str | int | float | bool]:
-        if self.mode != "q-learning":
-            return {
-                "left actions": self._action_counts[Action.LEFT],
-                "straight actions": self._action_counts[Action.STRAIGHT],
-                "right actions": self._action_counts[Action.RIGHT],
-                "learning status": "No learning - baseline agent",
-            }
+    def _learning_telemetry(
+        self,
+    ) -> tuple[dict[str, str | int | float | bool], tuple[float, float, float] | None]:
+        q_agent, encoder = self._active_q_learning()
+        if q_agent is None or encoder is None:
+            return (
+                {
+                    "left actions": self._action_counts[Action.LEFT],
+                    "straight actions": self._action_counts[Action.STRAIGHT],
+                    "right actions": self._action_counts[Action.RIGHT],
+                    "learning status": "No learning - baseline agent",
+                },
+                None,
+            )
 
-        encoded = encode_state(self.game.state)
-        q_values = self.q_agent.q_table[encoded.state_id]
+        encoded = encoder(self.game.state)
+        q_values = q_agent.q_table[encoded.state_id]
         metrics: dict[str, str | int | float | bool] = {
             "state bits": "".join(str(bit) for bit in encoded.features),
             "state ID": encoded.state_id,
-            "Q(left)": f"{q_values[Action.LEFT]:.3f}",
-            "Q(straight)": f"{q_values[Action.STRAIGHT]:.3f}",
-            "Q(right)": f"{q_values[Action.RIGHT]:.3f}",
-            "epsilon": f"{self.q_agent.epsilon:.3f}",
+            "table rows": q_agent.state_count,
+            "epsilon": f"{q_agent.epsilon:.3f}",
         }
-        update = self.q_agent.last_update
+        update = q_agent.last_update
         if update is not None:
             metrics.update(
                 {
@@ -167,4 +193,22 @@ class DashboardController:
                     "new Q": f"{update.new_value:.3f}",
                 }
             )
-        return metrics
+        return metrics, tuple(q_values)
+
+    @property
+    def _average_snake_length_50(self) -> float:
+        if not self._recent_snake_lengths:
+            return 0.0
+        return sum(self._recent_snake_lengths) / len(self._recent_snake_lengths)
+
+    def _active_q_learning(
+        self,
+    ) -> tuple[
+        QLearningAgent | None,
+        Callable[[GameState], EncodedState] | None,
+    ]:
+        if self.mode == "q-learning":
+            return self.q_agent, encode_state
+        if self.mode == "q-learning-2step":
+            return self.two_step_q_agent, encode_two_step_state
+        return None, None

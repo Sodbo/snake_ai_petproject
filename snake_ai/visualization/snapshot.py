@@ -22,5 +22,7 @@ class DashboardSnapshot:
     action: Action | None = None
     paused: bool = True
     speed: int = 1
+    max_snake_length: int = 3
+    average_snake_length_50: float = 0.0
+    q_values: tuple[float, float, float] | None = None
     metrics: Mapping[str, MetricValue] = field(default_factory=dict)
-

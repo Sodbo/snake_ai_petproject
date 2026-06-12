@@ -8,7 +8,7 @@ from typing import Callable
 
 import pygame
 
-from snake_ai.game import Direction, GameState
+from snake_ai.game import Action, Direction, GameState
 from snake_ai.visualization.controller import DashboardController, MODES, SPEEDS
 from snake_ai.visualization.snapshot import DashboardSnapshot
 
@@ -26,6 +26,7 @@ GREEN = (0, 175, 70)
 HEAD_GREEN = (0, 235, 95)
 RED = (230, 45, 45)
 ACCENT = (60, 130, 235)
+SELECTED = (245, 180, 45)
 
 
 @dataclass
@@ -53,6 +54,7 @@ class Dashboard:
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont("consolas", 18)
         self.small_font = pygame.font.SysFont("consolas", 15)
+        self.tiny_font = pygame.font.SysFont("consolas", 13)
         self.title_font = pygame.font.SysFont("consolas", 22, bold=True)
         self.controller = controller
         self.running = True
@@ -219,27 +221,82 @@ class Dashboard:
             ("Action", action),
             ("Direction", state.direction.name.lower()),
             ("Snake length", len(state.snake)),
+            ("Max length", snapshot.max_snake_length),
+            ("Avg length (50)", f"{snapshot.average_snake_length_50:.2f}"),
             ("Food", state.food),
             ("Status", status),
             ("Speed", f"{snapshot.speed}x"),
         )
         for label, value in rows:
             self._text(f"{label}: {value}", x, y, self.font)
-            y += 23
+            y += 18
 
-        y += 10
+        y += 7
         self._text("LEARNING VIEW", x, y, self.title_font)
         y += 28
         self._text(snapshot.learning_view, x, y, self.font, ACCENT)
         y += 25
+        if snapshot.q_values is not None:
+            y = self._draw_q_values(snapshot, x, y, area.right - x - 18)
+            y += 8
         for label, value in snapshot.metrics.items():
-            self._text(f"{label}: {value}", x, y, self.small_font, MUTED)
-            y += 19
+            self._text(f"{label}: {value}", x, y, self.tiny_font, MUTED)
+            y += 16
         if snapshot.learning_view == "Baseline agent":
             y += 8
             self._text("Future agent panels:", x, y, self.small_font, MUTED)
             y += 19
             self._text("Q-table | network | backprop", x, y, self.small_font, MUTED)
+
+    def _draw_q_values(
+        self, snapshot: DashboardSnapshot, x: int, y: int, width: int
+    ) -> int:
+        assert snapshot.q_values is not None
+        self._text("CURRENT STATE ACTION VALUES", x, y, self.small_font, WHITE)
+        y += 21
+        values = snapshot.q_values
+        largest = max(max(abs(value) for value in values), 1.0)
+        best = max(values)
+        label_width = 92
+        value_width = 68
+        bar_x = x + label_width
+        bar_width = max(80, width - label_width - value_width)
+        center_x = bar_x + bar_width // 2
+        half_width = bar_width // 2 - 4
+
+        for action in Action:
+            value = values[action]
+            row = pygame.Rect(bar_x, y, bar_width, 18)
+            pygame.draw.rect(self.surface, PANEL_LIGHT, row, border_radius=3)
+            pygame.draw.line(
+                self.surface, MUTED, (center_x, row.y), (center_x, row.bottom)
+            )
+            extent = int(abs(value) / largest * half_width)
+            if extent:
+                fill = pygame.Rect(
+                    center_x if value >= 0 else center_x - extent,
+                    row.y + 2,
+                    extent,
+                    row.height - 4,
+                )
+                pygame.draw.rect(
+                    self.surface, GREEN if value >= 0 else RED, fill, border_radius=2
+                )
+            if value == best:
+                pygame.draw.rect(self.surface, ACCENT, row, 2, border_radius=3)
+            if snapshot.action == action:
+                pygame.draw.circle(self.surface, SELECTED, (x + 5, y + 9), 4)
+            self._text(action.name.lower(), x + 14, y + 1, self.small_font)
+            self._text(f"{value:+.3f}", row.right + 8, y + 1, self.small_font)
+            y += 24
+        self._text(
+            "blue = best | amber = last selected",
+            x,
+            y,
+            self.small_font,
+            MUTED,
+        )
+        return y + 18
 
     def _draw_controls(self, area: pygame.Rect) -> None:
         pygame.draw.rect(self.surface, PANEL, area, border_radius=5)
@@ -276,6 +333,12 @@ class Dashboard:
             active=lambda: self.controller.mode == "q-learning",
         )
         add(
+            "Q-2Step",
+            lambda: self.controller.set_mode("q-learning-2step"),
+            width=88,
+            active=lambda: self.controller.mode == "q-learning-2step",
+        )
+        add(
             "Pause",
             self.controller.toggle_pause,
             active=lambda: self.controller.paused,
@@ -285,7 +348,7 @@ class Dashboard:
             add(
                 f"{speed}x",
                 lambda selected=speed: self.controller.set_speed(selected),
-                width=58,
+                width=64 if speed >= 1000 else 58,
                 active=lambda selected=speed: (
                     not self.controller.paused and self.controller.speed == selected
                 ),

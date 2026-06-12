@@ -68,7 +68,10 @@ python -m snake_ai.agents.random_agent --episodes 5 --width 10 --height 10 --ren
 
 The Pygame dashboard uses a minimal black game board with a green snake and
 red food. It supports manual and random agents, board-size controls, live game
-telemetry, pause/single-step execution, and speeds from `1x` through `500x`.
+telemetry, pause/single-step execution, and speeds from `1x` through `5000x`.
+
+The game-state panel tracks the maximum snake length reached and the average
+final snake length across the last 50 completed episodes.
 
 ```text
 python -m snake_ai.visualization.dashboard
@@ -101,3 +104,32 @@ python -m snake_ai.visualization.dashboard --mode q-learning --seed 42
 The learning panel displays the current state bits and ID, all three Q-values,
 epsilon, whether the action explored or exploited, and the complete latest
 Q-learning update: old value, reward, target, and new value.
+
+Both Q-learning dashboard modes also show a three-row action-value chart for
+the current state. Positive Q-values extend right in green, negative values
+extend left in red, the best action has a blue outline, and the most recently
+selected action has an amber marker.
+
+### Two-Step Danger Experiment
+
+An additional Q-learning agent expands danger sensing to six relative inputs:
+
+```text
+forward-1 | left-1 | right-1 | forward-2 | left-2 | right-2
+```
+
+The distance-two inputs indicate whether the cell exactly two spaces away is
+currently blocked by a wall or snake body. Combined with direction and food
+inputs, this creates a 14-bit state and a `16384 x 3` Q-table.
+
+Train it without the GUI:
+
+```text
+python -m snake_ai.agents.q_learning_two_step --episodes 1000 --seed 42
+```
+
+Watch it in the dashboard:
+
+```text
+python -m snake_ai.visualization.dashboard --mode q-learning-2step --seed 42
+```

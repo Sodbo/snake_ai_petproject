@@ -52,6 +52,12 @@ class QLearningAgentTests(unittest.TestCase):
         self.assertEqual(len(agent.q_table[0]), ACTION_COUNT)
         self.assertTrue(all(value == 0.0 for row in agent.q_table for value in row))
 
+    def test_q_table_accepts_custom_state_count(self) -> None:
+        agent = QLearningAgent(state_count=8)
+
+        self.assertEqual(agent.state_count, 8)
+        self.assertEqual(len(agent.q_table), 8)
+
     def test_terminal_update_uses_reward_as_target(self) -> None:
         agent = QLearningAgent(learning_rate=0.1, discount=0.9)
 
