@@ -73,6 +73,12 @@ telemetry, pause/single-step execution, and speeds from `1x` through `5000x`.
 The game-state panel tracks the maximum snake length reached and the average
 final snake length across the last 50 completed episodes.
 
+The lower dashboard chart shows the full current run from episode 1 through
+the latest completed episode. It plots the all-time maximum snake length and
+the rolling-50 average final snake length.
+Current-state Q-action values remain in the upper-right panel, while state
+bits, state ID, epsilon, and Q-update calculations appear below them.
+
 ```text
 python -m snake_ai.visualization.dashboard
 python -m snake_ai.visualization.dashboard --mode manual --width 10 --height 10
@@ -133,3 +139,28 @@ Watch it in the dashboard:
 ```text
 python -m snake_ai.visualization.dashboard --mode q-learning-2step --seed 42
 ```
+
+## Training Metrics And Comparison
+
+Headless command-line training is substantially faster than GUI training
+because it does not render frames or process window events. Specify the exact
+number of episodes and dump metrics at the end:
+
+```text
+python -m snake_ai.agents.q_learning --episodes 10000 --seed 42 --output outputs/stats/q_learning.json
+python -m snake_ai.agents.q_learning_two_step --episodes 15000 --seed 42 --output outputs/stats/q_learning_two_step.json
+```
+
+The runs may contain different episode counts. Each metrics file preserves its
+own episode numbers. Create a comparison figure containing all-time maximum
+and rolling-average snake-length plots:
+
+```text
+python -m snake_ai.training.compare_stats outputs/stats/q_learning.json outputs/stats/q_learning_two_step.json --output outputs/q_comparison.png
+```
+
+The comparison plot uses a rolling average over 500 episodes by default. Use
+`--window` to choose a different averaging period.
+
+The dashboard's `Dump Stats` button saves all completed episodes from the
+current dashboard run under `outputs/stats/`.

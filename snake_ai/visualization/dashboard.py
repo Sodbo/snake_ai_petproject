@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import math
 from typing import Callable
 
 import pygame
@@ -12,7 +13,7 @@ from snake_ai.game import Action, Direction, GameState
 from snake_ai.visualization.controller import DashboardController, MODES, SPEEDS
 from snake_ai.visualization.snapshot import DashboardSnapshot
 
-WINDOW_SIZE = (1280, 820)
+WINDOW_SIZE = (1440, 960)
 FPS = 60
 BASE_STEPS_PER_SECOND = 8
 
@@ -27,6 +28,8 @@ HEAD_GREEN = (0, 235, 95)
 RED = (230, 45, 45)
 ACCENT = (60, 130, 235)
 SELECTED = (245, 180, 45)
+CHART_AVERAGE = (0, 190, 100)
+CHART_MAX = (70, 140, 255)
 
 
 @dataclass
@@ -149,11 +152,22 @@ class Dashboard:
     def _draw(self) -> None:
         self.surface.fill(BLACK)
         width, height = self.surface.get_size()
-        board_area = pygame.Rect(24, 24, min(width - 420, height - 180), height - 180)
-        side_panel = pygame.Rect(board_area.right + 24, 24, width - board_area.right - 48, height - 180)
         controls = pygame.Rect(24, height - 132, width - 48, 108)
-        self._draw_board(self.controller.snapshot.game_state, board_area)
-        self._draw_side_panel(self.controller.snapshot, side_panel)
+        chart_height = max(170, min(240, height // 4))
+        chart = pygame.Rect(24, controls.y - chart_height - 16, width - 48, chart_height)
+        upper_height = chart.y - 40
+        board_width = min(upper_height, max(360, int(width * 0.46)))
+        board_area = pygame.Rect(24, 24, board_width, upper_height)
+        info_panel = pygame.Rect(
+            board_area.right + 24,
+            24,
+            width - board_area.right - 48,
+            upper_height,
+        )
+        snapshot = self.controller.snapshot
+        self._draw_board(snapshot.game_state, board_area)
+        self._draw_info_panel(snapshot, info_panel)
+        self._draw_length_chart(snapshot, chart)
         self._draw_controls(controls)
 
     def _draw_board(self, state: GameState, area: pygame.Rect) -> None:
@@ -204,11 +218,21 @@ class Dashboard:
         )
         pygame.draw.rect(self.surface, color, rect)
 
-    def _draw_side_panel(self, snapshot: DashboardSnapshot, area: pygame.Rect) -> None:
+    def _draw_info_panel(self, snapshot: DashboardSnapshot, area: pygame.Rect) -> None:
         pygame.draw.rect(self.surface, PANEL, area, border_radius=5)
-        x, y = area.x + 18, area.y + 18
+        padding = 18
+        left_width = int(area.width * 0.42)
+        divider_x = area.x + left_width
+        pygame.draw.line(
+            self.surface,
+            GRID,
+            (divider_x, area.y + padding),
+            (divider_x, area.bottom - padding),
+        )
+
+        x, y = area.x + padding, area.y + padding
         self._text("GAME STATE", x, y, self.title_font)
-        y += 40
+        y += 34
         state = snapshot.game_state
         action = snapshot.action.name.lower() if snapshot.action is not None else "-"
         status = "Paused" if snapshot.paused else "Running"
@@ -228,32 +252,127 @@ class Dashboard:
             ("Speed", f"{snapshot.speed}x"),
         )
         for label, value in rows:
-            self._text(f"{label}: {value}", x, y, self.font)
-            y += 18
-
-        y += 7
-        self._text("LEARNING VIEW", x, y, self.title_font)
-        y += 28
-        self._text(snapshot.learning_view, x, y, self.font, ACCENT)
-        y += 25
-        if snapshot.q_values is not None:
-            y = self._draw_q_values(snapshot, x, y, area.right - x - 18)
-            y += 8
-        for label, value in snapshot.metrics.items():
-            self._text(f"{label}: {value}", x, y, self.tiny_font, MUTED)
-            y += 16
-        if snapshot.learning_view == "Baseline agent":
-            y += 8
-            self._text("Future agent panels:", x, y, self.small_font, MUTED)
+            self._text(f"{label}: {value}", x, y, self.small_font)
             y += 19
-            self._text("Q-table | network | backprop", x, y, self.small_font, MUTED)
+
+        q_x = divider_x + padding
+        q_y = area.y + padding
+        self._text("CURRENT ACTION VALUES", q_x, q_y, self.title_font)
+        q_y += 34
+        self._text(snapshot.learning_view, q_x, q_y, self.font, ACCENT)
+        q_y += 28
+        if snapshot.q_values is not None:
+            q_y = self._draw_q_values(
+                snapshot, q_x, q_y, area.right - q_x - padding
+            )
+        else:
+            self._text(
+                "Available for Q-learning agents.",
+                q_x,
+                q_y,
+                self.small_font,
+                MUTED,
+            )
+
+        metrics_y = max(y + 8, q_y + 12)
+        pygame.draw.line(
+            self.surface,
+            GRID,
+            (area.x + padding, metrics_y),
+            (area.right - padding, metrics_y),
+        )
+        metrics_y += 12
+        self._text("LEARNING UPDATE", area.x + padding, metrics_y, self.title_font)
+        metrics_y += 30
+        metric_items = list(snapshot.metrics.items())
+        column_width = (area.width - padding * 3) // 2
+        for index, (label, value) in enumerate(metric_items):
+            column = index % 2
+            row = index // 2
+            metric_x = area.x + padding + column * (column_width + padding)
+            metric_y = metrics_y + row * 18
+            self._text(f"{label}: {value}", metric_x, metric_y, self.small_font, MUTED)
+
+    def _draw_length_chart(
+        self, snapshot: DashboardSnapshot, area: pygame.Rect
+    ) -> None:
+        pygame.draw.rect(self.surface, PANEL, area, border_radius=5)
+        self._text(
+            "SNAKE LENGTH - CURRENT RUN",
+            area.x + 18,
+            area.y + 14,
+            self.title_font,
+        )
+        legend_x = area.right - 350
+        self._text("all-time maximum", legend_x, area.y + 18, self.small_font, CHART_MAX)
+        self._text(
+            "average (rolling 50)",
+            legend_x + 155,
+            area.y + 18,
+            self.small_font,
+            CHART_AVERAGE,
+        )
+        plot = pygame.Rect(area.x + 54, area.y + 48, area.width - 78, area.height - 78)
+        pygame.draw.rect(self.surface, GRID, plot, 1)
+        if not snapshot.length_history:
+            self._text(
+                "Chart begins after the first completed episode.",
+                plot.x + 18,
+                plot.centery - 8,
+                self.small_font,
+                MUTED,
+            )
+            return
+
+        series_max = snapshot.running_max
+        series_average = snapshot.rolling_average_50
+        upper = max(3.0, max(series_max))
+        lower = min(3.0, min(series_average))
+        span = max(1.0, upper - lower)
+        for tick in range(5):
+            value = lower + span * tick / 4
+            tick_y = plot.bottom - int(plot.height * tick / 4)
+            pygame.draw.line(self.surface, GRID, (plot.x, tick_y), (plot.right, tick_y))
+            self._text(f"{value:.1f}", area.x + 8, tick_y - 8, self.tiny_font, MUTED)
+
+        self._text("1", plot.x, plot.bottom + 8, self.tiny_font, MUTED)
+        self._text(
+            str(snapshot.episode - 1),
+            plot.right - 34,
+            plot.bottom + 8,
+            self.tiny_font,
+            MUTED,
+        )
+        self._draw_chart_series(plot, series_max, lower, span, CHART_MAX)
+        self._draw_chart_series(plot, series_average, lower, span, CHART_AVERAGE)
+
+    def _draw_chart_series(
+        self,
+        plot: pygame.Rect,
+        values: tuple[float, ...],
+        lower: float,
+        span: float,
+        color: tuple[int, int, int],
+    ) -> None:
+        if len(values) < 2:
+            return
+        stride = max(1, math.ceil(len(values) / plot.width))
+        indices = list(range(0, len(values), stride))
+        if indices[-1] != len(values) - 1:
+            indices.append(len(values) - 1)
+        points = [
+            (
+                plot.x + int(index / (len(values) - 1) * plot.width),
+                plot.bottom - int((values[index] - lower) / span * plot.height),
+            )
+            for index in indices
+        ]
+        pygame.draw.lines(self.surface, color, False, points, 2)
 
     def _draw_q_values(
         self, snapshot: DashboardSnapshot, x: int, y: int, width: int
     ) -> int:
         assert snapshot.q_values is not None
-        self._text("CURRENT STATE ACTION VALUES", x, y, self.small_font, WHITE)
-        y += 21
         values = snapshot.q_values
         largest = max(max(abs(value) for value in values), 1.0)
         best = max(values)
@@ -354,8 +473,13 @@ class Dashboard:
                 ),
             )
         add("Reset", self.controller.reset, width=70)
+        add("Dump Stats", self._dump_stats, width=96)
 
         self._draw_board_size_controls(area)
+
+    def _dump_stats(self) -> None:
+        output = self.controller.dump_stats()
+        print(f"Metrics saved to {output}")
 
     def _draw_board_size_controls(self, area: pygame.Rect) -> None:
         y = area.y + 60

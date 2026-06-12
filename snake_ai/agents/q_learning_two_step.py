@@ -11,6 +11,7 @@ from snake_ai.agents.q_learning import (
 )
 from snake_ai.agents.results import EpisodeResult, ScoreTracker
 from snake_ai.game import Action, Direction, GameState, SnakeGame
+from snake_ai.training.metrics import build_metrics, save_metrics
 
 STATE_FEATURES = (
     "danger forward-1",
@@ -140,6 +141,7 @@ def main() -> None:
     parser.add_argument("--epsilon-min", type=float, default=0.05)
     parser.add_argument("--epsilon-decay", type=float, default=0.995)
     parser.add_argument("--report-every", type=int, default=100)
+    parser.add_argument("--output", help="Write episode metrics to this JSON file.")
     args = parser.parse_args()
     _, tracker = train_two_step_q_learning(
         episodes=args.episodes,
@@ -154,6 +156,26 @@ def main() -> None:
         report_every=args.report_every,
     )
     print(tracker.summary())
+    if args.output:
+        output = save_metrics(
+            build_metrics(
+                "Q-Learning 2-Step",
+                tracker.results,
+                config={
+                    "episodes": args.episodes,
+                    "width": args.width,
+                    "height": args.height,
+                    "seed": args.seed,
+                    "learning_rate": args.learning_rate,
+                    "discount": args.discount,
+                    "epsilon": args.epsilon,
+                    "epsilon_min": args.epsilon_min,
+                    "epsilon_decay": args.epsilon_decay,
+                },
+            ),
+            args.output,
+        )
+        print(f"Metrics saved to {output}")
 
 
 if __name__ == "__main__":

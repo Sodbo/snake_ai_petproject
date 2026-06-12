@@ -5,4 +5,5 @@ dependencies:
   - python=3.12
   - pip
   - pip:
+      - matplotlib==3.10.3
       - pygame==2.6.1

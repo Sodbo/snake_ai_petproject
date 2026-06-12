@@ -24,5 +24,8 @@ class DashboardSnapshot:
     speed: int = 1
     max_snake_length: int = 3
     average_snake_length_50: float = 0.0
+    length_history: tuple[int, ...] = ()
+    running_max: tuple[float, ...] = ()
+    rolling_average_50: tuple[float, ...] = ()
     q_values: tuple[float, float, float] | None = None
     metrics: Mapping[str, MetricValue] = field(default_factory=dict)

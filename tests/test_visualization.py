@@ -1,6 +1,9 @@
 import unittest
+from tempfile import TemporaryDirectory
+from pathlib import Path
 
 from snake_ai.game import Action, Direction
+from snake_ai.training.metrics import load_metrics
 from snake_ai.visualization.controller import DashboardController
 from snake_ai.visualization.snapshot import DashboardSnapshot
 
@@ -63,12 +66,48 @@ class DashboardControllerTests(unittest.TestCase):
     def test_snake_length_statistics_use_last_50_completed_episodes(self) -> None:
         controller = DashboardController(3, 3, seed=1)
 
-        controller._recent_snake_lengths.extend(range(1, 52))
+        for length in range(1, 52):
+            controller._record_episode_length(length)
         controller._max_snake_length = 60
         snapshot = controller.snapshot
 
         self.assertEqual(snapshot.max_snake_length, 60)
         self.assertEqual(snapshot.average_snake_length_50, sum(range(2, 52)) / 50)
+        self.assertEqual(snapshot.length_history, tuple(range(1, 52)))
+        self.assertEqual(snapshot.running_max[-1], 51.0)
+        self.assertEqual(snapshot.rolling_average_50[-1], sum(range(2, 52)) / 50)
+
+    def test_length_history_keeps_full_current_run(self) -> None:
+        controller = DashboardController()
+
+        for length in range(250):
+            controller._record_episode_length(length)
+        snapshot = controller.snapshot
+
+        self.assertEqual(len(snapshot.length_history), 250)
+        self.assertEqual(snapshot.length_history[0], 0)
+        self.assertEqual(snapshot.length_history[-1], 249)
+        self.assertEqual(snapshot.running_max, tuple(float(value) for value in range(250)))
+
+    def test_running_maximum_never_decreases(self) -> None:
+        controller = DashboardController()
+        for length in (3, 8, 5, 12, 4):
+            controller._record_episode_length(length)
+
+        self.assertEqual(controller.snapshot.running_max, (3.0, 8.0, 8.0, 12.0, 12.0))
+
+    def test_dashboard_dump_keeps_all_completed_episode_lengths(self) -> None:
+        controller = DashboardController(mode="q-learning")
+        for length in range(205):
+            controller._record_episode_length(length)
+
+        with TemporaryDirectory() as directory:
+            output = controller.dump_stats(Path(directory) / "metrics.json")
+            metrics = load_metrics(output)
+
+        self.assertEqual(metrics["algorithm"], "Q-Learning")
+        self.assertEqual(len(metrics["episodes"]), 205)
+        self.assertEqual(metrics["episodes"][-1]["snake_length"], 204)
 
     def test_q_learning_mode_updates_table_and_telemetry(self) -> None:
         controller = DashboardController(5, 5, seed=1, mode="q-learning")

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from collections import Counter, deque
+from collections import Counter
+from datetime import datetime
+from pathlib import Path
 import random
 from typing import Callable
 
@@ -13,6 +15,7 @@ from snake_ai.agents.q_learning_two_step import (
     encode_two_step_state,
 )
 from snake_ai.game import Action, Direction, GameState, SnakeGame
+from snake_ai.training.metrics import build_length_metrics, save_metrics
 from snake_ai.visualization.snapshot import DashboardSnapshot
 
 SPEEDS = (1, 5, 10, 50, 100, 500, 1000, 5000)
@@ -43,7 +46,9 @@ class DashboardController:
         self.speed = 1
         self._pending_manual_action = Action.STRAIGHT
         self._action_counts: Counter[Action] = Counter()
-        self._recent_snake_lengths: deque[int] = deque(maxlen=50)
+        self._episode_snake_lengths: list[int] = []
+        self._running_max_lengths: list[float] = []
+        self._rolling_average_lengths: list[float] = []
         self._max_snake_length = len(self.game.state.snake)
         self.q_agent = QLearningAgent(seed=seed)
         self.two_step_q_agent = TwoStepDangerQLearningAgent(seed=seed)
@@ -69,6 +74,9 @@ class DashboardController:
             speed=self.speed,
             max_snake_length=self._max_snake_length,
             average_snake_length_50=self._average_snake_length_50,
+            length_history=tuple(self._episode_snake_lengths),
+            running_max=tuple(self._running_max_lengths),
+            rolling_average_50=tuple(self._rolling_average_lengths),
             q_values=q_values,
             metrics=metrics,
         )
@@ -88,6 +96,30 @@ class DashboardController:
     def toggle_pause(self) -> None:
         self.paused = not self.paused
 
+    def dump_stats(self, output: str | Path | None = None) -> Path:
+        """Save all completed dashboard episodes as metrics JSON."""
+        if output is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output = Path("outputs/stats") / f"{self.mode}_{timestamp}.json"
+        algorithm = {
+            "q-learning": "Q-Learning",
+            "q-learning-2step": "Q-Learning 2-Step",
+        }.get(self.mode, self.mode.title())
+        return save_metrics(
+            build_length_metrics(
+                algorithm,
+                self._episode_snake_lengths,
+                config={
+                    "source": "dashboard",
+                    "mode": self.mode,
+                    "width": self.game.width,
+                    "height": self.game.height,
+                    "completed_episodes": len(self._episode_snake_lengths),
+                },
+            ),
+            output,
+        )
+
     def reset(self, *, width: int | None = None, height: int | None = None) -> None:
         width = self.game.width if width is None else width
         height = self.game.height if height is None else height
@@ -97,7 +129,9 @@ class DashboardController:
         self.action = None
         self.paused = True
         self._action_counts.clear()
-        self._recent_snake_lengths.clear()
+        self._episode_snake_lengths.clear()
+        self._running_max_lengths.clear()
+        self._rolling_average_lengths.clear()
         self._max_snake_length = len(self.game.state.snake)
         self.q_agent = QLearningAgent(seed=self._seed)
         self.two_step_q_agent = TwoStepDangerQLearningAgent(seed=self._seed)
@@ -145,7 +179,7 @@ class DashboardController:
         self._action_counts[action] += 1
         self._max_snake_length = max(self._max_snake_length, len(next_state.snake))
         if done:
-            self._recent_snake_lengths.append(len(next_state.snake))
+            self._record_episode_length(len(next_state.snake))
         if done and self.mode == "manual":
             self.paused = True
 
@@ -197,9 +231,17 @@ class DashboardController:
 
     @property
     def _average_snake_length_50(self) -> float:
-        if not self._recent_snake_lengths:
+        if not self._episode_snake_lengths:
             return 0.0
-        return sum(self._recent_snake_lengths) / len(self._recent_snake_lengths)
+        recent = tuple(self._episode_snake_lengths)[-50:]
+        return sum(recent) / len(recent)
+
+    def _record_episode_length(self, length: int) -> None:
+        self._episode_snake_lengths.append(length)
+        previous_max = self._running_max_lengths[-1] if self._running_max_lengths else 0
+        self._running_max_lengths.append(float(max(previous_max, length)))
+        recent = self._episode_snake_lengths[-50:]
+        self._rolling_average_lengths.append(sum(recent) / len(recent))
 
     def _active_q_learning(
         self,
