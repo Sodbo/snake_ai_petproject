@@ -1,0 +1,5 @@
+name: snake-ai
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
