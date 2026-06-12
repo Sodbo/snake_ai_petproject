@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import random
 
 from snake_ai.agents.results import EpisodeResult, ScoreTracker
-from snake_ai.game import Action, Direction, GameState, SnakeGame
+from snake_ai.game import DEFAULT_STEP_PENALTY, Action, Direction, GameState, SnakeGame
 from snake_ai.training.metrics import build_metrics, save_metrics
 
 STATE_FEATURES = (
@@ -224,6 +224,7 @@ def train_q_learning(
     epsilon: float = 1.0,
     epsilon_min: float = 0.05,
     epsilon_decay: float = 0.995,
+    step_penalty: float = DEFAULT_STEP_PENALTY,
     report_every: int = 100,
 ) -> tuple[QLearningAgent, ScoreTracker]:
     """Train a tabular agent without opening the dashboard."""
@@ -232,7 +233,7 @@ def train_q_learning(
     if report_every < 1:
         raise ValueError("report_every must be at least 1")
 
-    game = SnakeGame(width, height, seed=seed)
+    game = SnakeGame(width, height, seed=seed, step_penalty=step_penalty)
     agent = QLearningAgent(
         learning_rate=learning_rate,
         discount=discount,
@@ -287,6 +288,7 @@ def main() -> None:
     parser.add_argument("--epsilon", type=float, default=1.0)
     parser.add_argument("--epsilon-min", type=float, default=0.05)
     parser.add_argument("--epsilon-decay", type=float, default=0.995)
+    parser.add_argument("--step-penalty", type=float, default=DEFAULT_STEP_PENALTY)
     parser.add_argument("--report-every", type=int, default=100)
     parser.add_argument("--output", help="Write episode metrics to this JSON file.")
     args = parser.parse_args()
@@ -300,6 +302,7 @@ def main() -> None:
         epsilon=args.epsilon,
         epsilon_min=args.epsilon_min,
         epsilon_decay=args.epsilon_decay,
+        step_penalty=args.step_penalty,
         report_every=args.report_every,
     )
     print(tracker.summary())
@@ -323,6 +326,7 @@ def main() -> None:
                     "epsilon": args.epsilon,
                     "epsilon_min": args.epsilon_min,
                     "epsilon_decay": args.epsilon_decay,
+                    "step_penalty": args.step_penalty,
                     "allocated_state_count": agent.state_count,
                     "valid_state_count": agent.valid_state_count,
                 },

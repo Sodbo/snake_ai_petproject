@@ -9,7 +9,7 @@ from typing import Callable
 
 import pygame
 
-from snake_ai.game import Action, Direction, GameState
+from snake_ai.game import DEFAULT_STEP_PENALTY, Action, Direction, GameState
 from snake_ai.visualization.controller import DashboardController, MODES, SPEEDS
 from snake_ai.visualization.snapshot import DashboardSnapshot
 
@@ -31,6 +31,7 @@ SELECTED = (245, 180, 45)
 CHART_AVERAGE = (0, 190, 100)
 CHART_MAX = (70, 140, 255)
 CHART_COVERAGE = (190, 100, 255)
+CHART_LOSS = (245, 150, 45)
 
 
 @dataclass
@@ -65,6 +66,7 @@ class Dashboard:
         self.step_accumulator = 0.0
         self.width_text = str(controller.game.width)
         self.height_text = str(controller.game.height)
+        self.sight_text = str(controller.sight_distance)
         self.active_input: str | None = None
         self.buttons: list[Button] = []
 
@@ -127,7 +129,12 @@ class Dashboard:
             self.controller.reset()
 
     def _edit_input(self, event: pygame.event.Event) -> None:
-        value = self.width_text if self.active_input == "width" else self.height_text
+        values = {
+            "width": self.width_text,
+            "height": self.height_text,
+            "sight": self.sight_text,
+        }
+        value = values[self.active_input]
         if event.key == pygame.K_BACKSPACE:
             value = value[:-1]
         elif event.key == pygame.K_RETURN:
@@ -138,17 +145,23 @@ class Dashboard:
             value += event.unicode
         if self.active_input == "width":
             self.width_text = value
-        else:
+        elif self.active_input == "height":
             self.height_text = value
+        else:
+            self.sight_text = value
 
     def _apply_board_size(self) -> None:
         try:
             width = int(self.width_text)
             height = int(self.height_text)
+            sight_distance = int(self.sight_text)
+            if sight_distance != self.controller.sight_distance:
+                self.controller.set_sight_distance(sight_distance)
             self.controller.reset(width=width, height=height)
         except ValueError:
             self.width_text = str(self.controller.game.width)
             self.height_text = str(self.controller.game.height)
+            self.sight_text = str(self.controller.sight_distance)
 
     def _draw(self) -> None:
         self.surface.fill(BLACK)
@@ -242,7 +255,7 @@ class Dashboard:
             ("Episode", snapshot.episode),
             ("Step", state.steps),
             ("Score", state.score),
-            ("Reward", f"{snapshot.reward:.1f}"),
+            ("Reward", f"{snapshot.reward:.2f}"),
             ("Action", action),
             ("Direction", state.direction.name.lower()),
             ("Snake length", len(state.snake)),
@@ -259,6 +272,7 @@ class Dashboard:
             ("Food", state.food),
             ("Status", status),
             ("Speed", f"{snapshot.speed}x"),
+            ("Step penalty", f"{self.controller.step_penalty:.2f}"),
         )
         for label, value in rows:
             self._text(f"{label}: {value}", x, y, self.small_font)
@@ -276,7 +290,7 @@ class Dashboard:
             )
         else:
             self._text(
-                "Available for Q-learning agents.",
+                "Available for learning agents.",
                 q_x,
                 q_y,
                 self.small_font,
@@ -328,6 +342,14 @@ class Dashboard:
             self.small_font,
             CHART_COVERAGE,
         )
+        if snapshot.loss_history:
+            self._text(
+                "DQN loss",
+                legend_x + 355,
+                area.y + 18,
+                self.small_font,
+                CHART_LOSS,
+            )
         plot = pygame.Rect(area.x + 54, area.y + 48, area.width - 108, area.height - 78)
         pygame.draw.rect(self.surface, GRID, plot, 1)
         if not snapshot.length_history:
@@ -379,6 +401,25 @@ class Dashboard:
                 0.0,
                 coverage_upper,
                 CHART_COVERAGE,
+            )
+        elif snapshot.loss_history:
+            loss_upper = max(1.0, max(snapshot.loss_history) * 1.1)
+            for tick in range(5):
+                value = loss_upper * tick / 4
+                tick_y = plot.bottom - int(plot.height * tick / 4)
+                self._text(
+                    f"{value:.2f}",
+                    plot.right + 6,
+                    tick_y - 8,
+                    self.tiny_font,
+                    CHART_LOSS,
+                )
+            self._draw_chart_series(
+                plot,
+                snapshot.loss_history,
+                0.0,
+                loss_upper,
+                CHART_LOSS,
             )
 
     def _draw_chart_series(
@@ -493,6 +534,19 @@ class Dashboard:
             active=lambda: self.controller.mode == "q-learning-2step",
         )
         add(
+            "DQN",
+            lambda: self.controller.set_mode("dqn"),
+            width=64,
+            active=lambda: self.controller.mode == "dqn",
+        )
+        if self.controller.mode == "dqn-inference":
+            add(
+                "DQN View",
+                lambda: None,
+                width=86,
+                active=lambda: True,
+            )
+        add(
             "Pause",
             self.controller.toggle_pause,
             active=lambda: self.controller.paused,
@@ -516,6 +570,10 @@ class Dashboard:
         output = self.controller.dump_stats()
         print(f"Metrics saved to {output}")
 
+    def _save_model(self) -> None:
+        output = self.controller.save_dqn_checkpoint()
+        print(f"Checkpoint saved to {output}")
+
     def _draw_board_size_controls(self, area: pygame.Rect) -> None:
         y = area.y + 60
         self._text("Board:", area.x + 16, y + 7, self.small_font)
@@ -523,16 +581,28 @@ class Dashboard:
             active = name == self.active_input
             pygame.draw.rect(self.surface, PANEL_LIGHT, rect, border_radius=3)
             pygame.draw.rect(self.surface, ACCENT if active else MUTED, rect, 1)
-            value = self.width_text if name == "width" else self.height_text
+            value = {
+                "width": self.width_text,
+                "height": self.height_text,
+                "sight": self.sight_text,
+            }[name]
             self._text(value, rect.x + 8, rect.y + 6, self.small_font)
         self._text("x", area.x + 202, y + 7, self.small_font)
-        apply_rect = pygame.Rect(area.x + 282, y, 70, 30)
+        self._text("DQN sight:", area.x + 320, y + 7, self.small_font)
+        apply_rect = pygame.Rect(area.x + 500, y, 70, 30)
         button = Button("Apply", apply_rect, self._apply_board_size)
         self.buttons.append(button)
         button.draw(self.surface, self.small_font)
+        help_x = area.x + 590
+        if self.controller.mode in ("dqn", "dqn-inference"):
+            save_rect = pygame.Rect(area.x + 580, y, 96, 30)
+            save_button = Button("Save Model", save_rect, self._save_model)
+            self.buttons.append(save_button)
+            save_button.draw(self.surface, self.small_font)
+            help_x = area.x + 690
         self._text(
             "Arrow keys: steer manual | Space: pause | N: step | R: reset",
-            area.x + 380,
+            help_x,
             y + 7,
             self.small_font,
             MUTED,
@@ -544,6 +614,7 @@ class Dashboard:
         return {
             "width": pygame.Rect(100, y, 74, 30),
             "height": pygame.Rect(230, y, 74, 30),
+            "sight": pygame.Rect(435, y, 60, 30),
         }
 
     def _text(
@@ -563,9 +634,20 @@ def main() -> None:
     parser.add_argument("--height", type=int, default=20)
     parser.add_argument("--seed", type=int)
     parser.add_argument("--mode", choices=MODES, default="random")
+    parser.add_argument("--sight-distance", type=int, default=1)
+    parser.add_argument("--step-penalty", type=float, default=DEFAULT_STEP_PENALTY)
+    parser.add_argument("--checkpoint", help="Load a DQN checkpoint for inference.")
     args = parser.parse_args()
     Dashboard(
-        DashboardController(args.width, args.height, seed=args.seed, mode=args.mode)
+        DashboardController(
+            args.width,
+            args.height,
+            seed=args.seed,
+            mode=args.mode,
+            sight_distance=args.sight_distance,
+            step_penalty=args.step_penalty,
+            dqn_checkpoint=args.checkpoint,
+        )
     ).run()
 
 

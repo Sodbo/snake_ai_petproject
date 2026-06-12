@@ -30,9 +30,10 @@ class SnakeGameTests(unittest.TestCase):
     def test_relative_actions_change_direction_and_position(self) -> None:
         game = SnakeGame(8, 8, seed=1)
 
-        state, _, _, _ = game.step(Action.LEFT)
+        state, reward, _, _ = game.step(Action.LEFT)
         self.assertEqual(state.direction, Direction.UP)
         self.assertEqual(state.head, (4, 3))
+        self.assertEqual(reward, -0.01)
 
         state, _, _, _ = game.step(Action.RIGHT)
         self.assertEqual(state.direction, Direction.RIGHT)
@@ -74,6 +75,13 @@ class SnakeGameTests(unittest.TestCase):
         self.assertFalse(done)
         self.assertEqual(info["event"], "ate_food")
 
+    def test_step_penalty_is_configurable_without_changing_terminal_rewards(self) -> None:
+        game = SnakeGame(8, 8, seed=1, step_penalty=-0.25)
+
+        _, reward, _, _ = game.step(Action.LEFT)
+
+        self.assertEqual(reward, -0.25)
+
     def test_state_snapshot_is_immutable(self) -> None:
         state = SnakeGame(seed=1).state
 
@@ -91,6 +99,10 @@ class SnakeGameTests(unittest.TestCase):
             with self.subTest(action=action):
                 with self.assertRaises(ValueError):
                     game.step(action)
+        for penalty in (True, 0.1, float("inf"), "small"):
+            with self.subTest(step_penalty=penalty):
+                with self.assertRaises(ValueError):
+                    SnakeGame(step_penalty=penalty)
 
     def test_render_returns_and_prints_board(self) -> None:
         game = SnakeGame(8, 8, seed=1)

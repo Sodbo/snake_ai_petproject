@@ -7,7 +7,7 @@ import os
 import sys
 
 from snake_ai.agents.results import EpisodeResult, ScoreTracker
-from snake_ai.game import Action, Direction, SnakeGame
+from snake_ai.game import DEFAULT_STEP_PENALTY, Action, Direction, SnakeGame
 
 _ARROW_KEYS = {
     "up": Direction.UP,
@@ -49,9 +49,10 @@ def play_manual(
     width: int = 20,
     height: int = 20,
     seed: int | None = None,
+    step_penalty: float = DEFAULT_STEP_PENALTY,
 ) -> ScoreTracker:
     """Play episodes until the player chooses to quit."""
-    game = SnakeGame(width, height, seed=seed)
+    game = SnakeGame(width, height, seed=seed, step_penalty=step_penalty)
     tracker = ScoreTracker()
 
     while True:
@@ -60,7 +61,7 @@ def play_manual(
             tracker.add(result)
             print(
                 f"Game over. Score: {result.score} | Steps: {result.steps} | "
-                f"Total reward: {result.total_reward:.1f}"
+                f"Total reward: {result.total_reward:.2f}"
             )
             print(tracker.summary())
         if quit_requested:
@@ -103,7 +104,7 @@ def _render_frame(
     action_name = action.name.lower() if action is not None else "-"
     print(
         f"Episode: {episode} | Step: {state.steps} | Score: {state.score} | "
-        f"Reward: {reward:.1f} | Action: {action_name}"
+        f"Reward: {reward:.2f} | Action: {action_name}"
     )
     print("Arrow keys: move | A/D: turn | W/Space: straight | Q: quit")
 
@@ -159,8 +160,14 @@ def main() -> None:
     parser.add_argument("--width", type=int, default=20)
     parser.add_argument("--height", type=int, default=20)
     parser.add_argument("--seed", type=int)
+    parser.add_argument("--step-penalty", type=float, default=DEFAULT_STEP_PENALTY)
     args = parser.parse_args()
-    play_manual(width=args.width, height=args.height, seed=args.seed)
+    play_manual(
+        width=args.width,
+        height=args.height,
+        seed=args.seed,
+        step_penalty=args.step_penalty,
+    )
 
 
 if __name__ == "__main__":

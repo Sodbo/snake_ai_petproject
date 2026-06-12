@@ -29,5 +29,6 @@ class DashboardSnapshot:
     rolling_average_50: tuple[float, ...] = ()
     q_table_coverage: float | None = None
     coverage_history: tuple[float, ...] = ()
+    loss_history: tuple[float, ...] = ()
     q_values: tuple[float, float, float] | None = None
     metrics: Mapping[str, MetricValue] = field(default_factory=dict)

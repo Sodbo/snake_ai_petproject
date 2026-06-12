@@ -43,6 +43,7 @@ def build_metrics(
     results: Iterable[EpisodeResult],
     *,
     q_table_coverage: Sequence[float] | None = None,
+    loss: Sequence[float] | None = None,
     config: Mapping[str, object] | None = None,
 ) -> MetricsData:
     """Build serializable metrics from completed training episodes."""
@@ -57,6 +58,7 @@ def build_metrics(
         for index, result in enumerate(results, start=1)
     ]
     _add_q_table_coverage(episodes, q_table_coverage)
+    _add_optional_series(episodes, "loss", loss)
     return {
         "algorithm": algorithm,
         "config": dict(config or {}),
@@ -69,6 +71,7 @@ def build_length_metrics(
     lengths: Sequence[int],
     *,
     q_table_coverage: Sequence[float] | None = None,
+    loss: Sequence[float] | None = None,
     config: Mapping[str, object] | None = None,
 ) -> MetricsData:
     """Build serializable metrics when only final snake lengths are available."""
@@ -77,6 +80,7 @@ def build_length_metrics(
         for index, length in enumerate(lengths, start=1)
     ]
     _add_q_table_coverage(episodes, q_table_coverage)
+    _add_optional_series(episodes, "loss", loss)
     return {
         "algorithm": algorithm,
         "config": dict(config or {}),
@@ -94,6 +98,19 @@ def _add_q_table_coverage(
         raise ValueError("Q-table coverage must contain one value per episode")
     for episode, value in zip(episodes, coverage):
         episode["q_table_coverage"] = float(value)
+
+
+def _add_optional_series(
+    episodes: Sequence[dict[str, int | float]],
+    name: str,
+    values: Sequence[float] | None,
+) -> None:
+    if values is None:
+        return
+    if len(values) != len(episodes):
+        raise ValueError(f"{name} must contain one value per episode")
+    for episode, value in zip(episodes, values):
+        episode[name] = float(value)
 
 
 def save_metrics(data: MetricsData, output: str | Path) -> Path:
@@ -127,8 +144,9 @@ def plot_length_comparison(
     matplotlib.use("Agg", force=True)
     import matplotlib.pyplot as plt
 
-    figure, axes = plt.subplots(3, 1, figsize=(12, 11), sharex=False)
+    figure, axes = plt.subplots(4, 1, figsize=(12, 14), sharex=False)
     coverage_plotted = False
+    loss_plotted = False
     maximum_coverage = 0.0
     for data in datasets:
         algorithm = str(data["algorithm"])
@@ -149,10 +167,15 @@ def plot_length_comparison(
             axes[2].plot(x_values, coverage, label=algorithm)
             coverage_plotted = True
             maximum_coverage = max(maximum_coverage, max(coverage))
+        loss = [float(item["loss"]) for item in episodes if "loss" in item]
+        if len(loss) == len(episodes):
+            axes[3].plot(x_values, loss, label=algorithm)
+            loss_plotted = True
 
     axes[0].set_title("All-Time Maximum Snake Length")
     axes[1].set_title(f"Rolling Average Snake Length (window={window})")
     axes[2].set_title("Cumulative Valid-Space Q-Table Coverage")
+    axes[3].set_title("Episode Average Training Loss")
     axes[2].set_ylim(0, min(100, max(1, maximum_coverage * 1.1)))
     for axis in axes:
         axis.set_xlabel("Episode")
@@ -160,6 +183,7 @@ def plot_length_comparison(
     axes[0].set_ylabel("Snake length")
     axes[1].set_ylabel("Snake length")
     axes[2].set_ylabel("Coverage (%)")
+    axes[3].set_ylabel("MSE loss")
     axes[0].legend()
     axes[1].legend()
     if coverage_plotted:
@@ -172,6 +196,17 @@ def plot_length_comparison(
             ha="center",
             va="center",
             transform=axes[2].transAxes,
+        )
+    if loss_plotted:
+        axes[3].legend()
+    else:
+        axes[3].text(
+            0.5,
+            0.5,
+            "No training loss data in these metrics files",
+            ha="center",
+            va="center",
+            transform=axes[3].transAxes,
         )
     figure.tight_layout()
 

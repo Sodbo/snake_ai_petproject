@@ -18,6 +18,7 @@ class DashboardControllerTests(unittest.TestCase):
         self.assertEqual(snapshot.agent_name, "Random")
         self.assertEqual(snapshot.game_state.width, 8)
         self.assertIn("learning status", snapshot.metrics)
+        self.assertEqual(controller.step_penalty, -0.01)
 
     def test_paused_controller_only_advances_when_forced(self) -> None:
         controller = DashboardController(8, 8, seed=1)
@@ -157,6 +158,67 @@ class DashboardControllerTests(unittest.TestCase):
         self.assertEqual(snapshot.metrics["valid rows"], 2_048)
         self.assertEqual(len(snapshot.q_values), 3)
         self.assertIsNotNone(controller.two_step_q_agent.last_update)
+
+    def test_dqn_mode_trains_and_exports_loss_without_q_table_coverage(self) -> None:
+        controller = DashboardController(5, 5, seed=1, mode="dqn")
+        controller.dqn_agent.batch_size = 2
+        controller.set_speed(1)
+
+        while not controller.snapshot.loss_history:
+            controller.advance()
+        snapshot = controller.snapshot
+
+        self.assertEqual(snapshot.agent_name, "DQN")
+        self.assertEqual(snapshot.learning_view, "NumPy deep Q-network")
+        self.assertIsNone(snapshot.q_table_coverage)
+        self.assertFalse(snapshot.coverage_history)
+        self.assertEqual(len(snapshot.q_values), 3)
+        self.assertIn("replay size", snapshot.metrics)
+        self.assertIn("loss", snapshot.metrics)
+
+        with TemporaryDirectory() as directory:
+            output = controller.dump_stats(Path(directory) / "metrics.json")
+            metrics = load_metrics(output)
+
+        self.assertEqual(metrics["algorithm"], "DQN (NumPy)")
+        self.assertIn("loss", metrics["episodes"][0])
+        self.assertNotIn("q_table_coverage", metrics["episodes"][0])
+
+    def test_dqn_sight_distance_rebuilds_input_layer_and_is_exported(self) -> None:
+        controller = DashboardController(8, 8, seed=1, mode="dqn")
+
+        controller.set_sight_distance(2)
+        snapshot = controller.snapshot
+
+        self.assertEqual(controller.sight_distance, 2)
+        self.assertEqual(controller.dqn_agent.input_count, 32)
+        self.assertEqual(snapshot.metrics["sight cells"], 24)
+        self.assertEqual(snapshot.metrics["network inputs"], 32)
+        with TemporaryDirectory() as directory:
+            output = controller.dump_stats(Path(directory) / "metrics.json")
+            metrics = load_metrics(output)
+        self.assertEqual(metrics["config"]["sight_distance"], 2)
+        self.assertEqual(metrics["config"]["sight_cells"], 24)
+        self.assertEqual(metrics["config"]["step_penalty"], -0.01)
+
+    def test_loaded_dqn_inference_plays_without_learning(self) -> None:
+        agent = DashboardController(5, 5, seed=1, mode="dqn").dqn_agent
+        with TemporaryDirectory() as directory:
+            checkpoint = agent.save_checkpoint(Path(directory) / "policy.npz")
+            controller = DashboardController(
+                5,
+                5,
+                seed=1,
+                mode="dqn-inference",
+                dqn_checkpoint=checkpoint,
+            )
+            controller.advance(10, force=True)
+
+        self.assertEqual(controller.snapshot.agent_name, "DQN Inference")
+        self.assertFalse(controller.snapshot.metrics["learning"])
+        self.assertEqual(controller.dqn_agent.epsilon, 0.0)
+        self.assertEqual(controller.dqn_agent.training_steps, 0)
+        self.assertEqual(len(controller.dqn_agent.replay_buffer), 0)
 
 
 if __name__ == "__main__":

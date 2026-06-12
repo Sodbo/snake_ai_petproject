@@ -7,7 +7,7 @@ import random
 import time
 
 from snake_ai.agents.results import EpisodeResult, ScoreTracker
-from snake_ai.game import Action, SnakeGame
+from snake_ai.game import DEFAULT_STEP_PENALTY, Action, SnakeGame
 
 
 def run_episode(
@@ -45,6 +45,7 @@ def run_random_agent(
     seed: int | None = None,
     render: bool = False,
     delay: float = 0.0,
+    step_penalty: float = DEFAULT_STEP_PENALTY,
 ) -> ScoreTracker:
     """Run random-agent episodes and return their score tracker."""
     if episodes < 1:
@@ -52,7 +53,7 @@ def run_random_agent(
     if delay < 0:
         raise ValueError("delay cannot be negative")
 
-    game = SnakeGame(width, height, seed=seed)
+    game = SnakeGame(width, height, seed=seed, step_penalty=step_penalty)
     rng = random.Random(seed)
     tracker = ScoreTracker()
 
@@ -61,7 +62,7 @@ def run_random_agent(
         tracker.add(result)
         print(
             f"Episode {episode}: score={result.score}, "
-            f"steps={result.steps}, reward={result.total_reward:.1f}"
+            f"steps={result.steps}, reward={result.total_reward:.2f}"
         )
 
     print(tracker.summary())
@@ -82,7 +83,7 @@ def _render_frame(
     episode_text = str(episode) if episode is not None else "-"
     print(
         f"Episode: {episode_text} | Step: {state.steps} | Score: {state.score} | "
-        f"Reward: {reward:.1f} | Action: {action_name}"
+        f"Reward: {reward:.2f} | Action: {action_name}"
     )
 
 
@@ -93,6 +94,7 @@ def main() -> None:
     parser.add_argument("--height", type=int, default=20)
     parser.add_argument("--seed", type=int)
     parser.add_argument("--render", action="store_true")
+    parser.add_argument("--step-penalty", type=float, default=DEFAULT_STEP_PENALTY)
     parser.add_argument(
         "--delay",
         type=float,
@@ -107,6 +109,7 @@ def main() -> None:
         seed=args.seed,
         render=args.render,
         delay=args.delay,
+        step_penalty=args.step_penalty,
     )
 
 

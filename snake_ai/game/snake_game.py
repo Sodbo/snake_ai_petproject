@@ -5,9 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import IntEnum
 import random
+import math
 from typing import TypeAlias
 
 Position: TypeAlias = tuple[int, int]
+DEFAULT_STEP_PENALTY = -0.01
 
 
 class Action(IntEnum):
@@ -68,14 +70,23 @@ class SnakeGame:
         height: int = 20,
         *,
         seed: int | None = None,
+        step_penalty: float = DEFAULT_STEP_PENALTY,
     ) -> None:
         if isinstance(width, bool) or not isinstance(width, int) or width < 3:
             raise ValueError("width must be an integer of at least 3")
         if isinstance(height, bool) or not isinstance(height, int) or height < 3:
             raise ValueError("height must be an integer of at least 3")
+        if (
+            isinstance(step_penalty, bool)
+            or not isinstance(step_penalty, (int, float))
+            or not math.isfinite(step_penalty)
+            or step_penalty > 0
+        ):
+            raise ValueError("step_penalty must be a finite number at most 0")
 
         self.width = width
         self.height = height
+        self.step_penalty = float(step_penalty)
         self._rng = random.Random(seed)
         self._snake: list[Position] = []
         self._food: Position | None = None
@@ -138,7 +149,7 @@ class SnakeGame:
             return self.state, -10.0, True, self._info("collision", parsed_action)
 
         self._snake.insert(0, new_head)
-        reward = 0.0
+        reward = self.step_penalty
         event = "moved"
 
         if ate_food:

@@ -38,7 +38,9 @@ while not state.done:
 ```
 
 Food gives a reward of `10`, collision gives `-10`, and ordinary movement
-gives `0`.
+gives a small default step penalty of `-0.01`. This encourages agents to reach
+food efficiently instead of wandering indefinitely. Override it with
+`--step-penalty`, including `--step-penalty 0` to disable it.
 
 Run the tests with:
 
@@ -141,6 +143,55 @@ Watch it in the dashboard:
 
 ```text
 python -m snake_ai.visualization.dashboard --mode q-learning-2step --seed 42
+```
+
+## Phase 6: NumPy Deep Q-Network
+
+The DQN observes a configurable square of danger cells around the snake's
+head, plus four direction and four food-position inputs. With the default
+sight distance of 1, its network is `16 -> 64 -> 64 -> 3`: eight surrounding
+cells, eight direction/food inputs, and three action values. It stores
+transitions in replay memory, learns from random mini-batches, and uses a
+periodically synchronized target network to make learning more stable.
+
+Train it without the GUI:
+
+```text
+python -m snake_ai.agents.dqn --episodes 1000 --seed 42
+python -m snake_ai.agents.dqn --episodes 1000 --seed 42 --output outputs/stats/dqn.json
+python -m snake_ai.agents.dqn --episodes 1000 --sight-distance 2 --seed 42
+```
+
+Watch DQN train in the dashboard:
+
+```text
+python -m snake_ai.visualization.dashboard --mode dqn --seed 42
+python -m snake_ai.visualization.dashboard --mode dqn --sight-distance 2 --seed 42
+```
+
+The DQN dashboard shows current network Q-values, epsilon, replay-buffer size,
+mini-batch loss, training steps, and target-network synchronization. Its live
+chart and dumped metrics use per-episode average loss instead of Q-table
+coverage, because a DQN has no discrete Q-table to measure coverage for.
+The `DQN sight` GUI field controls the square danger-observation radius. Sight
+distance 1 observes 8 surrounding cells; distance 2 observes 24. Applying a
+new sight distance resets DQN training because it changes the network input
+layer.
+
+### Saving And Watching DQN Models
+
+Save a model after headless training:
+
+```text
+python -m snake_ai.agents.dqn --episodes 10000 --seed 42 --checkpoint outputs/models/dqn_10000.npz
+```
+
+The dashboard's `Save Model` button also saves the current DQN under
+`outputs/models/`. Load a checkpoint in inference-only mode to watch the
+learned policy without exploration, replay storage, or training:
+
+```text
+python -m snake_ai.visualization.dashboard --mode dqn-inference --checkpoint outputs/models/dqn_10000.npz
 ```
 
 ## Training Metrics And Comparison

@@ -53,6 +53,12 @@ class TrainingMetricsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_length_metrics("Q-Learning", (3, 4), q_table_coverage=(0.5,))
 
+    def test_metrics_include_optional_dqn_loss_per_episode(self) -> None:
+        data = build_length_metrics("DQN (NumPy)", (3, 4), loss=(0.0, 1.25))
+
+        self.assertNotIn("q_table_coverage", data["episodes"][0])
+        self.assertEqual(data["episodes"][1]["loss"], 1.25)
+
     def test_running_maximum_never_decreases(self) -> None:
         self.assertEqual(running_maximum((3, 7, 4, 9, 5)), (3.0, 7.0, 7.0, 9.0, 9.0))
 
@@ -77,6 +83,7 @@ class TrainingMetricsTests(unittest.TestCase):
             episode["q_table_coverage"] = episode["episode"] / 10
         for episode in second["episodes"]:
             episode["q_table_coverage"] = episode["episode"] / 20
+            episode["loss"] = 1 / episode["episode"]
 
         with TemporaryDirectory() as directory:
             output = plot_length_comparison(
