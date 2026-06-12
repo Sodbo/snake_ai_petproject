@@ -78,3 +78,26 @@ python -m snake_ai.visualization.dashboard --mode manual --width 10 --height 10
 The right-side learning panel currently shows baseline action statistics. Its
 snapshot interface is designed for later phases to provide Q-table updates,
 neural-network signals, weight/gradient summaries, and backpropagation data.
+
+## Phase 4: Tabular Q-Learning
+
+The Q-learning agent encodes each game situation into 11 binary features:
+immediate danger in three relative directions, the current absolute direction,
+and the food's relative position. Those features select one row from a
+zero-initialized `2048 x 3` Q-table.
+
+Train without opening the GUI:
+
+```text
+python -m snake_ai.agents.q_learning --episodes 1000 --seed 42
+```
+
+Watch learning happen in the dashboard:
+
+```text
+python -m snake_ai.visualization.dashboard --mode q-learning --seed 42
+```
+
+The learning panel displays the current state bits and ID, all three Q-values,
+epsilon, whether the action explored or exploited, and the complete latest
+Q-learning update: old value, reward, target, and new value.

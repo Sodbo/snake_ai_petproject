@@ -56,6 +56,18 @@ class DashboardControllerTests(unittest.TestCase):
         self.assertGreaterEqual(controller.episode, 2)
         self.assertFalse(controller.paused)
 
+    def test_q_learning_mode_updates_table_and_telemetry(self) -> None:
+        controller = DashboardController(5, 5, seed=1, mode="q-learning")
+
+        controller.advance(force=True)
+        snapshot = controller.snapshot
+
+        self.assertEqual(snapshot.agent_name, "Q-Learning")
+        self.assertEqual(snapshot.learning_view, "Tabular Q-learning")
+        self.assertIn("state ID", snapshot.metrics)
+        self.assertIn("old Q", snapshot.metrics)
+        self.assertIsNotNone(controller.q_agent.last_update)
+
 
 if __name__ == "__main__":
     unittest.main()

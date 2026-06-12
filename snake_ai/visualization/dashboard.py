@@ -9,7 +9,7 @@ from typing import Callable
 import pygame
 
 from snake_ai.game import Direction, GameState
-from snake_ai.visualization.controller import DashboardController, SPEEDS
+from snake_ai.visualization.controller import DashboardController, MODES, SPEEDS
 from snake_ai.visualization.snapshot import DashboardSnapshot
 
 WINDOW_SIZE = (1280, 820)
@@ -225,20 +225,21 @@ class Dashboard:
         )
         for label, value in rows:
             self._text(f"{label}: {value}", x, y, self.font)
-            y += 27
+            y += 23
 
-        y += 16
+        y += 10
         self._text("LEARNING VIEW", x, y, self.title_font)
-        y += 34
+        y += 28
         self._text(snapshot.learning_view, x, y, self.font, ACCENT)
-        y += 32
+        y += 25
         for label, value in snapshot.metrics.items():
             self._text(f"{label}: {value}", x, y, self.small_font, MUTED)
-            y += 23
-        y += 12
-        self._text("Future agent panels:", x, y, self.small_font, MUTED)
-        y += 21
-        self._text("Q-table | network | backprop", x, y, self.small_font, MUTED)
+            y += 19
+        if snapshot.learning_view == "Baseline agent":
+            y += 8
+            self._text("Future agent panels:", x, y, self.small_font, MUTED)
+            y += 19
+            self._text("Q-table | network | backprop", x, y, self.small_font, MUTED)
 
     def _draw_controls(self, area: pygame.Rect) -> None:
         pygame.draw.rect(self.surface, PANEL, area, border_radius=5)
@@ -267,6 +268,12 @@ class Dashboard:
             "Random",
             lambda: self.controller.set_mode("random"),
             active=lambda: self.controller.mode == "random",
+        )
+        add(
+            "Q-Learn",
+            lambda: self.controller.set_mode("q-learning"),
+            width=82,
+            active=lambda: self.controller.mode == "q-learning",
         )
         add(
             "Pause",
@@ -333,7 +340,7 @@ def main() -> None:
     parser.add_argument("--width", type=int, default=20)
     parser.add_argument("--height", type=int, default=20)
     parser.add_argument("--seed", type=int)
-    parser.add_argument("--mode", choices=("manual", "random"), default="random")
+    parser.add_argument("--mode", choices=MODES, default="random")
     args = parser.parse_args()
     Dashboard(
         DashboardController(args.width, args.height, seed=args.seed, mode=args.mode)

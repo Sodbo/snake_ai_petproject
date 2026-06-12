@@ -6,11 +6,12 @@ from collections import Counter
 import random
 
 from snake_ai.agents.manual_agent import action_for_direction
+from snake_ai.agents.q_learning import QLearningAgent, encode_state
 from snake_ai.game import Action, Direction, SnakeGame
 from snake_ai.visualization.snapshot import DashboardSnapshot
 
 SPEEDS = (1, 5, 10, 50, 100, 500)
-MODES = ("manual", "random")
+MODES = ("manual", "random", "q-learning")
 
 
 class DashboardController:
@@ -37,19 +38,19 @@ class DashboardController:
         self.speed = 1
         self._pending_manual_action = Action.STRAIGHT
         self._action_counts: Counter[Action] = Counter()
+        self.q_agent = QLearningAgent(seed=seed)
 
     @property
     def snapshot(self) -> DashboardSnapshot:
-        metrics = {
-            "left actions": self._action_counts[Action.LEFT],
-            "straight actions": self._action_counts[Action.STRAIGHT],
-            "right actions": self._action_counts[Action.RIGHT],
-            "learning status": "No learning - baseline agent",
-        }
+        metrics = self._learning_metrics()
+        agent_name = "Q-Learning" if self.mode == "q-learning" else self.mode.title()
+        learning_view = (
+            "Tabular Q-learning" if self.mode == "q-learning" else "Baseline agent"
+        )
         return DashboardSnapshot(
             game_state=self.game.state,
-            agent_name=self.mode.title(),
-            learning_view="Baseline agent",
+            agent_name=agent_name,
+            learning_view=learning_view,
             episode=self.episode,
             reward=self.reward,
             action=self.action,
@@ -82,6 +83,7 @@ class DashboardController:
         self.action = None
         self.paused = True
         self._action_counts.clear()
+        self.q_agent = QLearningAgent(seed=self._seed)
 
     def request_direction(self, direction: Direction) -> None:
         action = action_for_direction(self.game.state.direction, direction)
@@ -100,21 +102,69 @@ class DashboardController:
         if self.game.state.done:
             self._next_episode()
 
+        encoded = encode_state(self.game.state)
+        exploratory = False
         if self.mode == "manual":
             action = self._pending_manual_action
             self._pending_manual_action = Action.STRAIGHT
+        elif self.mode == "q-learning":
+            action, exploratory = self.q_agent.choose_action(encoded.state_id)
         else:
             action = self._rng.choice(tuple(Action))
 
-        _, self.reward, done, _ = self.game.step(action)
+        next_state, self.reward, done, _ = self.game.step(action)
+        if self.mode == "q-learning":
+            next_encoded = encode_state(next_state)
+            self.q_agent.update(
+                encoded.state_id,
+                action,
+                self.reward,
+                next_encoded.state_id,
+                done,
+                exploratory=exploratory,
+            )
         self.action = action
         self._action_counts[action] += 1
         if done and self.mode == "manual":
             self.paused = True
 
     def _next_episode(self) -> None:
+        if self.mode == "q-learning":
+            self.q_agent.finish_episode()
         self.episode += 1
         self.game.reset()
         self.reward = 0.0
         self.action = None
 
+    def _learning_metrics(self) -> dict[str, str | int | float | bool]:
+        if self.mode != "q-learning":
+            return {
+                "left actions": self._action_counts[Action.LEFT],
+                "straight actions": self._action_counts[Action.STRAIGHT],
+                "right actions": self._action_counts[Action.RIGHT],
+                "learning status": "No learning - baseline agent",
+            }
+
+        encoded = encode_state(self.game.state)
+        q_values = self.q_agent.q_table[encoded.state_id]
+        metrics: dict[str, str | int | float | bool] = {
+            "state bits": "".join(str(bit) for bit in encoded.features),
+            "state ID": encoded.state_id,
+            "Q(left)": f"{q_values[Action.LEFT]:.3f}",
+            "Q(straight)": f"{q_values[Action.STRAIGHT]:.3f}",
+            "Q(right)": f"{q_values[Action.RIGHT]:.3f}",
+            "epsilon": f"{self.q_agent.epsilon:.3f}",
+        }
+        update = self.q_agent.last_update
+        if update is not None:
+            metrics.update(
+                {
+                    "selection": "explore" if update.exploratory else "greedy",
+                    "updated row": update.state_id,
+                    "old Q": f"{update.old_value:.3f}",
+                    "update reward": f"{update.reward:.1f}",
+                    "target": f"{update.target:.3f}",
+                    "new Q": f"{update.new_value:.3f}",
+                }
+            )
+        return metrics
