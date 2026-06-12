@@ -18,6 +18,9 @@ from snake_ai.game import DEFAULT_STEP_PENALTY, Action, GameState, SnakeGame
 from snake_ai.training.metrics import build_metrics, save_metrics
 
 DEFAULT_SIGHT_DISTANCE = 1
+DEFAULT_LEARNING_STARTS = 1_000
+DEFAULT_TRAIN_EVERY = 4
+DEFAULT_GRADIENT_STEPS = 1
 POSITION_FEATURE_COUNT = 8
 INPUT_COUNT = (1 + 2 * DEFAULT_SIGHT_DISTANCE) ** 2 - 1 + POSITION_FEATURE_COUNT
 
@@ -205,6 +208,9 @@ class DQNAgent:
         replay_capacity: int = 10_000,
         batch_size: int = 64,
         target_sync_interval: int = 100,
+        learning_starts: int = DEFAULT_LEARNING_STARTS,
+        train_every: int = DEFAULT_TRAIN_EVERY,
+        gradient_steps: int = DEFAULT_GRADIENT_STEPS,
         sight_distance: int = DEFAULT_SIGHT_DISTANCE,
         seed: int | None = None,
     ) -> None:
@@ -223,6 +229,15 @@ class DQNAgent:
             raise ValueError("batch_size must be at least 1")
         if target_sync_interval < 1:
             raise ValueError("target_sync_interval must be at least 1")
+        for name, value in (
+            ("learning_starts", learning_starts),
+            ("train_every", train_every),
+            ("gradient_steps", gradient_steps),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"{name} must be an integer of at least 1")
+        if learning_starts > replay_capacity:
+            raise ValueError("learning_starts cannot exceed replay_capacity")
 
         self.sight_distance = sight_distance
         self.input_count = dqn_input_count(sight_distance)
@@ -231,6 +246,7 @@ class DQNAgent:
         self.target_network = QNetwork(layer_sizes, seed=seed)
         self.target_network.copy_from(self.online_network)
         self.replay_buffer = ReplayBuffer(replay_capacity, seed=seed)
+        self.replay_capacity = replay_capacity
         self.learning_rate = learning_rate
         self.discount = discount
         self.epsilon = epsilon
@@ -238,6 +254,10 @@ class DQNAgent:
         self.epsilon_decay = epsilon_decay
         self.batch_size = batch_size
         self.target_sync_interval = target_sync_interval
+        self.learning_starts = learning_starts
+        self.train_every = train_every
+        self.gradient_steps = gradient_steps
+        self.environment_steps = 0
         self.training_steps = 0
         self.last_update: DQNUpdate | None = None
         self.loss_history: list[float] = []
@@ -264,11 +284,22 @@ class DQNAgent:
         self.replay_buffer.append(
             Experience(tuple(state), action, reward, tuple(next_state), done)
         )
+        self.environment_steps += 1
 
     def learn(self) -> DQNUpdate | None:
-        """Sample replay memory and train the online network once."""
-        if len(self.replay_buffer) < self.batch_size:
+        """Train on schedule after replay memory has enough transitions."""
+        if (
+            len(self.replay_buffer) < max(self.batch_size, self.learning_starts)
+            or self.environment_steps % self.train_every != 0
+        ):
             return None
+        update = None
+        for _ in range(self.gradient_steps):
+            update = self._learn_once()
+        return update
+
+    def _learn_once(self) -> DQNUpdate:
+        """Sample replay memory and apply one gradient update."""
         batch = self.replay_buffer.sample(self.batch_size)
         states = np.asarray([item.state for item in batch], dtype=np.float32)
         next_states = np.asarray([item.next_state for item in batch], dtype=np.float32)
@@ -311,6 +342,11 @@ class DQNAgent:
             "sight_distance": self.sight_distance,
             "layer_sizes": self.online_network.layer_sizes,
             "training_steps": self.training_steps,
+            "environment_steps": self.environment_steps,
+            "learning_starts": self.learning_starts,
+            "train_every": self.train_every,
+            "gradient_steps": self.gradient_steps,
+            "replay_capacity": self.replay_capacity,
         }
         checkpoint_metadata.update(metadata or {})
         arrays: dict[str, np.ndarray] = {
@@ -339,11 +375,22 @@ class DQNAgent:
                 raise ValueError("unsupported DQN checkpoint format")
             layer_sizes = tuple(int(size) for size in metadata["layer_sizes"])
             sight_distance = int(metadata["sight_distance"])
+            learning_starts = int(
+                metadata.get("learning_starts", DEFAULT_LEARNING_STARTS)
+            )
             agent = cls(
                 hidden_sizes=layer_sizes[1:-1],
                 sight_distance=sight_distance,
                 epsilon=0.0,
                 epsilon_min=0.0,
+                replay_capacity=max(
+                    int(metadata.get("replay_capacity", 10_000)), learning_starts
+                ),
+                learning_starts=learning_starts,
+                train_every=int(metadata.get("train_every", DEFAULT_TRAIN_EVERY)),
+                gradient_steps=int(
+                    metadata.get("gradient_steps", DEFAULT_GRADIENT_STEPS)
+                ),
                 seed=seed,
             )
             if agent.online_network.layer_sizes != layer_sizes:
@@ -354,6 +401,7 @@ class DQNAgent:
                 target[:] = data[f"bias_{index}"]
         agent.target_network.copy_from(agent.online_network)
         agent.training_steps = int(metadata.get("training_steps", 0))
+        agent.environment_steps = int(metadata.get("environment_steps", 0))
         return agent, metadata
 
 
@@ -371,6 +419,9 @@ def train_dqn(
     replay_capacity: int = 10_000,
     batch_size: int = 64,
     target_sync_interval: int = 100,
+    learning_starts: int = DEFAULT_LEARNING_STARTS,
+    train_every: int = DEFAULT_TRAIN_EVERY,
+    gradient_steps: int = DEFAULT_GRADIENT_STEPS,
     sight_distance: int = DEFAULT_SIGHT_DISTANCE,
     step_penalty: float = DEFAULT_STEP_PENALTY,
     report_every: int = 100,
@@ -391,6 +442,9 @@ def train_dqn(
         replay_capacity=replay_capacity,
         batch_size=batch_size,
         target_sync_interval=target_sync_interval,
+        learning_starts=learning_starts,
+        train_every=train_every,
+        gradient_steps=gradient_steps,
         sight_distance=sight_distance,
         seed=seed,
     )
@@ -411,9 +465,9 @@ def train_dqn(
                 encode_dqn_state(next_state, sight_distance),
                 done,
             )
-            update = agent.learn()
-            if update is not None:
-                episode_losses.append(update.loss)
+            previous_loss_count = len(agent.loss_history)
+            agent.learn()
+            episode_losses.extend(agent.loss_history[previous_loss_count:])
             total_reward += reward
             state = next_state
 
@@ -449,6 +503,9 @@ def main() -> None:
     parser.add_argument("--replay-capacity", type=int, default=10_000)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--target-sync-interval", type=int, default=100)
+    parser.add_argument("--learning-starts", type=int, default=DEFAULT_LEARNING_STARTS)
+    parser.add_argument("--train-every", type=int, default=DEFAULT_TRAIN_EVERY)
+    parser.add_argument("--gradient-steps", type=int, default=DEFAULT_GRADIENT_STEPS)
     parser.add_argument("--sight-distance", type=int, default=DEFAULT_SIGHT_DISTANCE)
     parser.add_argument("--step-penalty", type=float, default=DEFAULT_STEP_PENALTY)
     parser.add_argument("--report-every", type=int, default=100)
@@ -468,6 +525,9 @@ def main() -> None:
         replay_capacity=args.replay_capacity,
         batch_size=args.batch_size,
         target_sync_interval=args.target_sync_interval,
+        learning_starts=args.learning_starts,
+        train_every=args.train_every,
+        gradient_steps=args.gradient_steps,
         sight_distance=args.sight_distance,
         step_penalty=args.step_penalty,
         report_every=args.report_every,
@@ -503,6 +563,10 @@ def main() -> None:
                     "replay_capacity": args.replay_capacity,
                     "batch_size": args.batch_size,
                     "target_sync_interval": args.target_sync_interval,
+                    "learning_starts": args.learning_starts,
+                    "train_every": args.train_every,
+                    "gradient_steps": args.gradient_steps,
+                    "environment_steps": agent.environment_steps,
                     "sight_distance": args.sight_distance,
                     "input_count": agent.input_count,
                     "step_penalty": args.step_penalty,

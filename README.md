@@ -178,6 +178,14 @@ distance 1 observes 8 surrounding cells; distance 2 observes 24. Applying a
 new sight distance resets DQN training because it changes the network input
 layer.
 
+To reduce training cost and improve replay diversity, DQN waits for 1,000
+transitions before learning and then performs one gradient update every four
+environment steps. These defaults can be adjusted:
+
+```text
+python -m snake_ai.agents.dqn --learning-starts 1000 --train-every 4 --gradient-steps 1
+```
+
 ### Saving And Watching DQN Models
 
 Save a model after headless training:
@@ -192,6 +200,34 @@ learned policy without exploration, replay storage, or training:
 
 ```text
 python -m snake_ai.visualization.dashboard --mode dqn-inference --checkpoint outputs/models/dqn_10000.npz
+```
+
+## Phase 7: PyTorch CNN Double DQN
+
+The CNN agent learns directly from the full board instead of handcrafted sight
+features. Its seven spatial channels represent the snake head, snake body,
+food, and four current-direction planes. Adaptive pooling lets one model
+architecture train on different board sizes.
+
+The agent uses PyTorch, Double DQN targets, replay memory, Smooth L1 loss,
+gradient clipping, target-network synchronization, CPU support, and automatic
+CUDA selection when a compatible GPU is available.
+
+```text
+python -m snake_ai.agents.cnn_dqn --episodes 10000 --device auto
+python -m snake_ai.agents.cnn_dqn --episodes 10000 --device cuda --checkpoint outputs/models/cnn_dqn.pt --output outputs/stats/cnn_dqn.json
+```
+
+Train CNN-DQN inside the dashboard using the `CNN` mode button or:
+
+```text
+python -m snake_ai.visualization.dashboard --mode cnn-dqn --cnn-device auto
+```
+
+Update the Conda environment before the first run:
+
+```text
+conda env update -f environment.yml --prune
 ```
 
 ## Training Metrics And Comparison

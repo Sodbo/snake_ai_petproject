@@ -84,6 +84,8 @@ class DQNAgentTests(unittest.TestCase):
             hidden_sizes=(8,),
             batch_size=2,
             target_sync_interval=1,
+            learning_starts=2,
+            train_every=1,
             seed=1,
         )
         state = (0.0,) * INPUT_COUNT
@@ -96,6 +98,30 @@ class DQNAgentTests(unittest.TestCase):
         self.assertIsNotNone(update)
         self.assertTrue(update.target_synced)
         self.assertEqual(agent.training_steps, 1)
+
+    def test_learning_schedule_delays_and_reduces_gradient_updates(self) -> None:
+        agent = DQNAgent(
+            hidden_sizes=(8,),
+            batch_size=2,
+            learning_starts=4,
+            train_every=2,
+            gradient_steps=3,
+            seed=1,
+        )
+        state = (0.0,) * INPUT_COUNT
+
+        for _ in range(3):
+            agent.remember(state, Action.LEFT, 0.0, state, False)
+            self.assertIsNone(agent.learn())
+        agent.remember(state, Action.LEFT, 0.0, state, False)
+        update = agent.learn()
+
+        self.assertIsNotNone(update)
+        self.assertEqual(agent.environment_steps, 4)
+        self.assertEqual(agent.training_steps, 3)
+        agent.remember(state, Action.LEFT, 0.0, state, False)
+        self.assertIsNone(agent.learn())
+        self.assertEqual(agent.training_steps, 3)
 
     def test_agent_input_layer_matches_sight_distance(self) -> None:
         agent = DQNAgent(sight_distance=2, seed=1)
@@ -129,6 +155,8 @@ class DQNAgentTests(unittest.TestCase):
                 seed=1,
                 batch_size=4,
                 target_sync_interval=2,
+                learning_starts=4,
+                train_every=1,
                 report_every=5,
             )
 

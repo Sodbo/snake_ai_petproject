@@ -162,6 +162,8 @@ class DashboardControllerTests(unittest.TestCase):
     def test_dqn_mode_trains_and_exports_loss_without_q_table_coverage(self) -> None:
         controller = DashboardController(5, 5, seed=1, mode="dqn")
         controller.dqn_agent.batch_size = 2
+        controller.dqn_agent.learning_starts = 2
+        controller.dqn_agent.train_every = 1
         controller.set_speed(1)
 
         while not controller.snapshot.loss_history:
@@ -175,6 +177,9 @@ class DashboardControllerTests(unittest.TestCase):
         self.assertEqual(len(snapshot.q_values), 3)
         self.assertIn("replay size", snapshot.metrics)
         self.assertIn("loss", snapshot.metrics)
+        self.assertIn("train every", snapshot.metrics)
+        self.assertEqual(snapshot.metrics["learning status"], "active")
+        self.assertIsNotNone(snapshot.learning_started_episode)
 
         with TemporaryDirectory() as directory:
             output = controller.dump_stats(Path(directory) / "metrics.json")
@@ -183,6 +188,19 @@ class DashboardControllerTests(unittest.TestCase):
         self.assertEqual(metrics["algorithm"], "DQN (NumPy)")
         self.assertIn("loss", metrics["episodes"][0])
         self.assertNotIn("q_table_coverage", metrics["episodes"][0])
+
+    def test_dqn_telemetry_distinguishes_transition_warmup_from_episodes(self) -> None:
+        controller = DashboardController(
+            8, 8, seed=1, mode="dqn", learning_starts=1000
+        )
+
+        controller.advance(force=True)
+        snapshot = controller.snapshot
+
+        self.assertEqual(snapshot.metrics["learning starts (steps)"], 1000)
+        self.assertEqual(snapshot.metrics["learning status"], "warm-up (999 steps remaining)")
+        self.assertEqual(snapshot.metrics["started at episode"], "-")
+        self.assertIsNone(snapshot.learning_started_episode)
 
     def test_dqn_sight_distance_rebuilds_input_layer_and_is_exported(self) -> None:
         controller = DashboardController(8, 8, seed=1, mode="dqn")
@@ -219,6 +237,41 @@ class DashboardControllerTests(unittest.TestCase):
         self.assertEqual(controller.dqn_agent.epsilon, 0.0)
         self.assertEqual(controller.dqn_agent.training_steps, 0)
         self.assertEqual(len(controller.dqn_agent.replay_buffer), 0)
+
+    def test_cnn_dqn_mode_trains_and_exports_cnn_telemetry(self) -> None:
+        controller = DashboardController(
+            5,
+            5,
+            seed=1,
+            mode="cnn-dqn",
+            learning_starts=2,
+            train_every=1,
+            cnn_device="cpu",
+        )
+        assert controller.cnn_agent is not None
+        controller.cnn_agent.batch_size = 2
+        controller.set_speed(1)
+
+        while not controller.snapshot.loss_history:
+            controller.advance()
+        snapshot = controller.snapshot
+
+        self.assertEqual(snapshot.agent_name, "CNN DQN")
+        self.assertEqual(snapshot.learning_view, "PyTorch full-board Double DQN")
+        self.assertEqual(snapshot.metrics["board channels"], 7)
+        self.assertEqual(snapshot.metrics["device"], "cpu")
+        self.assertEqual(snapshot.metrics["learning status"], "active")
+        self.assertEqual(len(snapshot.q_values), 3)
+        self.assertIsNone(snapshot.q_table_coverage)
+        with TemporaryDirectory() as directory:
+            output = controller.dump_stats(Path(directory) / "metrics.json")
+            model = controller.save_dqn_checkpoint(Path(directory) / "cnn.pt")
+            metrics = load_metrics(output)
+            self.assertTrue(model.exists())
+
+        self.assertEqual(metrics["algorithm"], "CNN Double DQN (PyTorch)")
+        self.assertEqual(metrics["config"]["board_channels"], 7)
+        self.assertEqual(metrics["config"]["device"], "cpu")
 
 
 if __name__ == "__main__":

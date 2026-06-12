@@ -9,6 +9,11 @@ from typing import Callable
 
 import pygame
 
+from snake_ai.agents.dqn import (
+    DEFAULT_GRADIENT_STEPS,
+    DEFAULT_LEARNING_STARTS,
+    DEFAULT_TRAIN_EVERY,
+)
 from snake_ai.game import DEFAULT_STEP_PENALTY, Action, Direction, GameState
 from snake_ai.visualization.controller import DashboardController, MODES, SPEEDS
 from snake_ai.visualization.snapshot import DashboardSnapshot
@@ -335,13 +340,6 @@ class Dashboard:
             self.small_font,
             CHART_AVERAGE,
         )
-        self._text(
-            "valid-space coverage",
-            legend_x + 355,
-            area.y + 18,
-            self.small_font,
-            CHART_COVERAGE,
-        )
         if snapshot.loss_history:
             self._text(
                 "DQN loss",
@@ -349,6 +347,14 @@ class Dashboard:
                 area.y + 18,
                 self.small_font,
                 CHART_LOSS,
+            )
+        elif snapshot.coverage_history:
+            self._text(
+                "valid-space coverage",
+                legend_x + 355,
+                area.y + 18,
+                self.small_font,
+                CHART_COVERAGE,
             )
         plot = pygame.Rect(area.x + 54, area.y + 48, area.width - 108, area.height - 78)
         pygame.draw.rect(self.surface, GRID, plot, 1)
@@ -383,6 +389,29 @@ class Dashboard:
         )
         self._draw_chart_series(plot, series_max, lower, span, CHART_MAX)
         self._draw_chart_series(plot, series_average, lower, span, CHART_AVERAGE)
+        if (
+            snapshot.learning_started_episode is not None
+            and snapshot.learning_started_episode <= len(snapshot.length_history)
+        ):
+            marker_x = plot.x + int(
+                (snapshot.learning_started_episode - 1)
+                / max(1, len(snapshot.length_history) - 1)
+                * plot.width
+            )
+            pygame.draw.line(
+                self.surface,
+                SELECTED,
+                (marker_x, plot.y),
+                (marker_x, plot.bottom),
+                1,
+            )
+            self._text(
+                f"learning began: ep {snapshot.learning_started_episode}",
+                min(marker_x + 5, plot.right - 150),
+                plot.y + 5,
+                self.tiny_font,
+                SELECTED,
+            )
         if snapshot.coverage_history:
             coverage_upper = min(100.0, max(1.0, max(snapshot.coverage_history) * 1.1))
             for tick in range(5):
@@ -539,6 +568,12 @@ class Dashboard:
             width=64,
             active=lambda: self.controller.mode == "dqn",
         )
+        add(
+            "CNN",
+            lambda: self.controller.set_mode("cnn-dqn"),
+            width=64,
+            active=lambda: self.controller.mode == "cnn-dqn",
+        )
         if self.controller.mode == "dqn-inference":
             add(
                 "DQN View",
@@ -594,7 +629,7 @@ class Dashboard:
         self.buttons.append(button)
         button.draw(self.surface, self.small_font)
         help_x = area.x + 590
-        if self.controller.mode in ("dqn", "dqn-inference"):
+        if self.controller.mode in ("dqn", "dqn-inference", "cnn-dqn"):
             save_rect = pygame.Rect(area.x + 580, y, 96, 30)
             save_button = Button("Save Model", save_rect, self._save_model)
             self.buttons.append(save_button)
@@ -637,6 +672,10 @@ def main() -> None:
     parser.add_argument("--sight-distance", type=int, default=1)
     parser.add_argument("--step-penalty", type=float, default=DEFAULT_STEP_PENALTY)
     parser.add_argument("--checkpoint", help="Load a DQN checkpoint for inference.")
+    parser.add_argument("--learning-starts", type=int, default=DEFAULT_LEARNING_STARTS)
+    parser.add_argument("--train-every", type=int, default=DEFAULT_TRAIN_EVERY)
+    parser.add_argument("--gradient-steps", type=int, default=DEFAULT_GRADIENT_STEPS)
+    parser.add_argument("--cnn-device", choices=("auto", "cpu", "cuda"), default="auto")
     args = parser.parse_args()
     Dashboard(
         DashboardController(
@@ -647,6 +686,10 @@ def main() -> None:
             sight_distance=args.sight_distance,
             step_penalty=args.step_penalty,
             dqn_checkpoint=args.checkpoint,
+            learning_starts=args.learning_starts,
+            train_every=args.train_every,
+            gradient_steps=args.gradient_steps,
+            cnn_device=args.cnn_device,
         )
     ).run()
 
