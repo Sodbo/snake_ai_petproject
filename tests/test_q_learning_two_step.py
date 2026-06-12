@@ -4,6 +4,7 @@ import unittest
 
 from snake_ai.agents.q_learning_two_step import (
     STATE_COUNT,
+    VALID_STATE_COUNT,
     TwoStepDangerQLearningAgent,
     encode_two_step_state,
     train_two_step_q_learning,
@@ -53,7 +54,9 @@ class TwoStepDangerQLearningAgentTests(unittest.TestCase):
         agent = TwoStepDangerQLearningAgent()
 
         self.assertEqual(STATE_COUNT, 16_384)
+        self.assertEqual(VALID_STATE_COUNT, 2_048)
         self.assertEqual(agent.state_count, STATE_COUNT)
+        self.assertEqual(agent.valid_state_count, VALID_STATE_COUNT)
         self.assertEqual(len(agent.q_table), STATE_COUNT)
 
     def test_short_training_run_updates_expanded_table(self) -> None:

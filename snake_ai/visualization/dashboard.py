@@ -30,6 +30,7 @@ ACCENT = (60, 130, 235)
 SELECTED = (245, 180, 45)
 CHART_AVERAGE = (0, 190, 100)
 CHART_MAX = (70, 140, 255)
+CHART_COVERAGE = (190, 100, 255)
 
 
 @dataclass
@@ -247,6 +248,14 @@ class Dashboard:
             ("Snake length", len(state.snake)),
             ("Max length", snapshot.max_snake_length),
             ("Avg length (50)", f"{snapshot.average_snake_length_50:.2f}"),
+            (
+                "Valid-space coverage",
+                (
+                    f"{snapshot.q_table_coverage:.3f}%"
+                    if snapshot.q_table_coverage is not None
+                    else "-"
+                ),
+            ),
             ("Food", state.food),
             ("Status", status),
             ("Speed", f"{snapshot.speed}x"),
@@ -303,7 +312,7 @@ class Dashboard:
             area.y + 14,
             self.title_font,
         )
-        legend_x = area.right - 350
+        legend_x = area.right - 540
         self._text("all-time maximum", legend_x, area.y + 18, self.small_font, CHART_MAX)
         self._text(
             "average (rolling 50)",
@@ -312,7 +321,14 @@ class Dashboard:
             self.small_font,
             CHART_AVERAGE,
         )
-        plot = pygame.Rect(area.x + 54, area.y + 48, area.width - 78, area.height - 78)
+        self._text(
+            "valid-space coverage",
+            legend_x + 355,
+            area.y + 18,
+            self.small_font,
+            CHART_COVERAGE,
+        )
+        plot = pygame.Rect(area.x + 54, area.y + 48, area.width - 108, area.height - 78)
         pygame.draw.rect(self.surface, GRID, plot, 1)
         if not snapshot.length_history:
             self._text(
@@ -345,6 +361,25 @@ class Dashboard:
         )
         self._draw_chart_series(plot, series_max, lower, span, CHART_MAX)
         self._draw_chart_series(plot, series_average, lower, span, CHART_AVERAGE)
+        if snapshot.coverage_history:
+            coverage_upper = min(100.0, max(1.0, max(snapshot.coverage_history) * 1.1))
+            for tick in range(5):
+                value = coverage_upper * tick / 4
+                tick_y = plot.bottom - int(plot.height * tick / 4)
+                self._text(
+                    f"{value:.1f}%",
+                    plot.right + 6,
+                    tick_y - 8,
+                    self.tiny_font,
+                    CHART_COVERAGE,
+                )
+            self._draw_chart_series(
+                plot,
+                snapshot.coverage_history,
+                0.0,
+                coverage_upper,
+                CHART_COVERAGE,
+            )
 
     def _draw_chart_series(
         self,

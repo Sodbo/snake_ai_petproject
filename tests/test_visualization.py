@@ -119,8 +119,31 @@ class DashboardControllerTests(unittest.TestCase):
         self.assertEqual(snapshot.learning_view, "Tabular Q-learning")
         self.assertIn("state ID", snapshot.metrics)
         self.assertIn("old Q", snapshot.metrics)
+        self.assertIn("valid-space coverage", snapshot.metrics)
+        self.assertEqual(snapshot.metrics["valid rows"], 256)
+        self.assertGreater(snapshot.q_table_coverage, 0.0)
         self.assertEqual(len(snapshot.q_values), 3)
         self.assertIsNotNone(controller.q_agent.last_update)
+
+    def test_q_learning_episode_records_coverage(self) -> None:
+        controller = DashboardController(3, 3, seed=1, mode="q-learning")
+        controller.set_speed(1)
+
+        while not controller.snapshot.coverage_history:
+            controller.advance()
+
+        self.assertEqual(len(controller.snapshot.coverage_history), 1)
+        self.assertGreater(controller.snapshot.coverage_history[0], 0.0)
+
+        with TemporaryDirectory() as directory:
+            output = controller.dump_stats(Path(directory) / "metrics.json")
+            metrics = load_metrics(output)
+
+        self.assertEqual(
+            metrics["episodes"][0]["q_table_coverage"],
+            controller.snapshot.coverage_history[0],
+        )
+        self.assertEqual(metrics["config"]["valid_state_count"], 256)
 
     def test_two_step_q_learning_mode_uses_expanded_table(self) -> None:
         controller = DashboardController(5, 5, seed=1, mode="q-learning-2step")
@@ -131,6 +154,7 @@ class DashboardControllerTests(unittest.TestCase):
         self.assertEqual(snapshot.agent_name, "Q-Learning 2-Step")
         self.assertEqual(snapshot.learning_view, "14-bit two-step danger")
         self.assertEqual(snapshot.metrics["table rows"], 16_384)
+        self.assertEqual(snapshot.metrics["valid rows"], 2_048)
         self.assertEqual(len(snapshot.q_values), 3)
         self.assertIsNotNone(controller.two_step_q_agent.last_update)
 

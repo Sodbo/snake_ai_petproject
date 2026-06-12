@@ -4,6 +4,7 @@ import unittest
 
 from snake_ai.agents.results import EpisodeResult
 from snake_ai.training.metrics import (
+    build_length_metrics,
     build_metrics,
     load_metrics,
     plot_length_comparison,
@@ -38,6 +39,20 @@ class TrainingMetricsTests(unittest.TestCase):
         self.assertEqual(maximum, (3.0, 5.0, 5.0, 8.0))
         self.assertEqual(average[-1], (5 + 4 + 8) / 3)
 
+    def test_metrics_include_q_table_coverage_per_episode(self) -> None:
+        data = build_length_metrics(
+            "Q-Learning",
+            (3, 4),
+            q_table_coverage=(0.5, 1.25),
+        )
+
+        self.assertEqual(data["episodes"][0]["q_table_coverage"], 0.5)
+        self.assertEqual(data["episodes"][1]["q_table_coverage"], 1.25)
+
+    def test_metrics_reject_mismatched_q_table_coverage(self) -> None:
+        with self.assertRaises(ValueError):
+            build_length_metrics("Q-Learning", (3, 4), q_table_coverage=(0.5,))
+
     def test_running_maximum_never_decreases(self) -> None:
         self.assertEqual(running_maximum((3, 7, 4, 9, 5)), (3.0, 7.0, 7.0, 9.0, 9.0))
 
@@ -58,6 +73,10 @@ class TrainingMetricsTests(unittest.TestCase):
                 for index in range(1, 9)
             ],
         }
+        for episode in first["episodes"]:
+            episode["q_table_coverage"] = episode["episode"] / 10
+        for episode in second["episodes"]:
+            episode["q_table_coverage"] = episode["episode"] / 20
 
         with TemporaryDirectory() as directory:
             output = plot_length_comparison(

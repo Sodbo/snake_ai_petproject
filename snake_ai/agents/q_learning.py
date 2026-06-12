@@ -24,6 +24,7 @@ STATE_FEATURES = (
     "food down",
 )
 STATE_COUNT = 2 ** len(STATE_FEATURES)
+VALID_STATE_COUNT = 256
 ACTION_COUNT = len(Action)
 
 _DIRECTION_VECTORS = {
@@ -120,6 +121,7 @@ class QLearningAgent:
         epsilon_min: float = 0.05,
         epsilon_decay: float = 0.995,
         state_count: int = STATE_COUNT,
+        valid_state_count: int | None = None,
         seed: int | None = None,
     ) -> None:
         for name, value in (
@@ -135,6 +137,12 @@ class QLearningAgent:
             raise ValueError("epsilon_min cannot exceed epsilon")
         if state_count < 1:
             raise ValueError("state_count must be at least 1")
+        if valid_state_count is None:
+            valid_state_count = (
+                VALID_STATE_COUNT if state_count == STATE_COUNT else state_count
+            )
+        if not 1 <= valid_state_count <= state_count:
+            raise ValueError("valid_state_count must be between 1 and state_count")
 
         self.learning_rate = learning_rate
         self.discount = discount
@@ -142,11 +150,24 @@ class QLearningAgent:
         self.epsilon_min = epsilon_min
         self.epsilon_decay = epsilon_decay
         self.state_count = state_count
+        self.valid_state_count = valid_state_count
         self.q_table = [
             [0.0 for _ in range(ACTION_COUNT)] for _ in range(state_count)
         ]
         self.last_update: QLearningUpdate | None = None
+        self.coverage_history: list[float] = []
+        self._updated_pairs: set[tuple[int, Action]] = set()
         self._rng = random.Random(seed)
+
+    @property
+    def q_table_coverage(self) -> float:
+        """Return updated cells as a percentage of logically valid Q-table cells."""
+        return self.updated_pair_count / (self.valid_state_count * ACTION_COUNT) * 100
+
+    @property
+    def updated_pair_count(self) -> int:
+        """Return the number of unique state-action cells updated."""
+        return len(self._updated_pairs)
 
     def choose_action(self, state_id: int) -> tuple[Action, bool]:
         """Choose an action using an epsilon-greedy policy."""
@@ -173,6 +194,7 @@ class QLearningAgent:
         target = reward + self.discount * future_value
         new_value = old_value + self.learning_rate * (target - old_value)
         self.q_table[state_id][action] = new_value
+        self._updated_pairs.add((state_id, action))
         self.last_update = QLearningUpdate(
             state_id=state_id,
             next_state_id=next_state_id,
@@ -187,6 +209,7 @@ class QLearningAgent:
 
     def finish_episode(self) -> None:
         """Decay exploration after a completed episode."""
+        self.coverage_history.append(self.q_table_coverage)
         self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
 
 
@@ -246,7 +269,8 @@ def train_q_learning(
             average = sum(result.score for result in recent) / len(recent)
             print(
                 f"Episode {episode}: recent_average={average:.2f}, "
-                f"best={tracker.best_score}, epsilon={agent.epsilon:.3f}"
+                f"best={tracker.best_score}, epsilon={agent.epsilon:.3f}, "
+                f"coverage={agent.q_table_coverage:.3f}%"
             )
 
     return agent, tracker
@@ -266,7 +290,7 @@ def main() -> None:
     parser.add_argument("--report-every", type=int, default=100)
     parser.add_argument("--output", help="Write episode metrics to this JSON file.")
     args = parser.parse_args()
-    _, tracker = train_q_learning(
+    agent, tracker = train_q_learning(
         episodes=args.episodes,
         width=args.width,
         height=args.height,
@@ -279,11 +303,16 @@ def main() -> None:
         report_every=args.report_every,
     )
     print(tracker.summary())
+    print(
+        f"Valid-space Q-table coverage: {agent.q_table_coverage:.3f}% "
+        f"({agent.updated_pair_count} / {agent.valid_state_count * ACTION_COUNT} cells)"
+    )
     if args.output:
         output = save_metrics(
             build_metrics(
                 "Q-Learning",
                 tracker.results,
+                q_table_coverage=agent.coverage_history,
                 config={
                     "episodes": args.episodes,
                     "width": args.width,
@@ -294,6 +323,8 @@ def main() -> None:
                     "epsilon": args.epsilon,
                     "epsilon_min": args.epsilon_min,
                     "epsilon_decay": args.epsilon_decay,
+                    "allocated_state_count": agent.state_count,
+                    "valid_state_count": agent.valid_state_count,
                 },
             ),
             args.output,

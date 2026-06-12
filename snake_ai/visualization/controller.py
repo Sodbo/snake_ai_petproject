@@ -49,6 +49,7 @@ class DashboardController:
         self._episode_snake_lengths: list[int] = []
         self._running_max_lengths: list[float] = []
         self._rolling_average_lengths: list[float] = []
+        self._coverage_history: list[float] = []
         self._max_snake_length = len(self.game.state.snake)
         self.q_agent = QLearningAgent(seed=seed)
         self.two_step_q_agent = TwoStepDangerQLearningAgent(seed=seed)
@@ -56,6 +57,7 @@ class DashboardController:
     @property
     def snapshot(self) -> DashboardSnapshot:
         metrics, q_values = self._learning_telemetry()
+        q_agent, _ = self._active_q_learning()
         names = {
             "q-learning": ("Q-Learning", "Tabular Q-learning"),
             "q-learning-2step": ("Q-Learning 2-Step", "14-bit two-step danger"),
@@ -77,6 +79,8 @@ class DashboardController:
             length_history=tuple(self._episode_snake_lengths),
             running_max=tuple(self._running_max_lengths),
             rolling_average_50=tuple(self._rolling_average_lengths),
+            q_table_coverage=q_agent.q_table_coverage if q_agent is not None else None,
+            coverage_history=tuple(self._coverage_history),
             q_values=q_values,
             metrics=metrics,
         )
@@ -105,17 +109,27 @@ class DashboardController:
             "q-learning": "Q-Learning",
             "q-learning-2step": "Q-Learning 2-Step",
         }.get(self.mode, self.mode.title())
+        q_agent, _ = self._active_q_learning()
+        config: dict[str, object] = {
+            "source": "dashboard",
+            "mode": self.mode,
+            "width": self.game.width,
+            "height": self.game.height,
+            "completed_episodes": len(self._episode_snake_lengths),
+        }
+        if q_agent is not None:
+            config.update(
+                {
+                    "allocated_state_count": q_agent.state_count,
+                    "valid_state_count": q_agent.valid_state_count,
+                }
+            )
         return save_metrics(
             build_length_metrics(
                 algorithm,
                 self._episode_snake_lengths,
-                config={
-                    "source": "dashboard",
-                    "mode": self.mode,
-                    "width": self.game.width,
-                    "height": self.game.height,
-                    "completed_episodes": len(self._episode_snake_lengths),
-                },
+                q_table_coverage=self._coverage_history or None,
+                config=config,
             ),
             output,
         )
@@ -132,6 +146,7 @@ class DashboardController:
         self._episode_snake_lengths.clear()
         self._running_max_lengths.clear()
         self._rolling_average_lengths.clear()
+        self._coverage_history.clear()
         self._max_snake_length = len(self.game.state.snake)
         self.q_agent = QLearningAgent(seed=self._seed)
         self.two_step_q_agent = TwoStepDangerQLearningAgent(seed=self._seed)
@@ -179,7 +194,12 @@ class DashboardController:
         self._action_counts[action] += 1
         self._max_snake_length = max(self._max_snake_length, len(next_state.snake))
         if done:
-            self._record_episode_length(len(next_state.snake))
+            self._record_episode_length(
+                len(next_state.snake),
+                q_table_coverage=(
+                    q_agent.q_table_coverage if q_agent is not None else None
+                ),
+            )
         if done and self.mode == "manual":
             self.paused = True
 
@@ -213,6 +233,8 @@ class DashboardController:
             "state bits": "".join(str(bit) for bit in encoded.features),
             "state ID": encoded.state_id,
             "table rows": q_agent.state_count,
+            "valid rows": q_agent.valid_state_count,
+            "valid-space coverage": f"{q_agent.q_table_coverage:.3f}%",
             "epsilon": f"{q_agent.epsilon:.3f}",
         }
         update = q_agent.last_update
@@ -236,12 +258,16 @@ class DashboardController:
         recent = tuple(self._episode_snake_lengths)[-50:]
         return sum(recent) / len(recent)
 
-    def _record_episode_length(self, length: int) -> None:
+    def _record_episode_length(
+        self, length: int, *, q_table_coverage: float | None = None
+    ) -> None:
         self._episode_snake_lengths.append(length)
         previous_max = self._running_max_lengths[-1] if self._running_max_lengths else 0
         self._running_max_lengths.append(float(max(previous_max, length)))
         recent = self._episode_snake_lengths[-50:]
         self._rolling_average_lengths.append(sum(recent) / len(recent))
+        if q_table_coverage is not None:
+            self._coverage_history.append(q_table_coverage)
 
     def _active_q_learning(
         self,

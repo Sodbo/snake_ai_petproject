@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 
 from snake_ai.agents.q_learning import (
+    ACTION_COUNT,
     EncodedState,
     QLearningAgent,
     danger_at_distance,
@@ -30,6 +31,7 @@ STATE_FEATURES = (
     "food down",
 )
 STATE_COUNT = 2 ** len(STATE_FEATURES)
+VALID_STATE_COUNT = 2_048
 
 
 def encode_two_step_state(state: GameState) -> EncodedState:
@@ -62,7 +64,11 @@ class TwoStepDangerQLearningAgent(QLearningAgent):
     """Q-learning agent using the expanded 14-bit state."""
 
     def __init__(self, **kwargs: object) -> None:
-        super().__init__(state_count=STATE_COUNT, **kwargs)
+        super().__init__(
+            state_count=STATE_COUNT,
+            valid_state_count=VALID_STATE_COUNT,
+            **kwargs,
+        )
 
 
 def train_two_step_q_learning(
@@ -121,7 +127,8 @@ def train_two_step_q_learning(
             average = sum(result.score for result in recent) / len(recent)
             print(
                 f"Episode {episode}: recent_average={average:.2f}, "
-                f"best={tracker.best_score}, epsilon={agent.epsilon:.3f}"
+                f"best={tracker.best_score}, epsilon={agent.epsilon:.3f}, "
+                f"coverage={agent.q_table_coverage:.3f}%"
             )
 
     return agent, tracker
@@ -143,7 +150,7 @@ def main() -> None:
     parser.add_argument("--report-every", type=int, default=100)
     parser.add_argument("--output", help="Write episode metrics to this JSON file.")
     args = parser.parse_args()
-    _, tracker = train_two_step_q_learning(
+    agent, tracker = train_two_step_q_learning(
         episodes=args.episodes,
         width=args.width,
         height=args.height,
@@ -156,11 +163,16 @@ def main() -> None:
         report_every=args.report_every,
     )
     print(tracker.summary())
+    print(
+        f"Valid-space Q-table coverage: {agent.q_table_coverage:.3f}% "
+        f"({agent.updated_pair_count} / {agent.valid_state_count * ACTION_COUNT} cells)"
+    )
     if args.output:
         output = save_metrics(
             build_metrics(
                 "Q-Learning 2-Step",
                 tracker.results,
+                q_table_coverage=agent.coverage_history,
                 config={
                     "episodes": args.episodes,
                     "width": args.width,
@@ -171,6 +183,8 @@ def main() -> None:
                     "epsilon": args.epsilon,
                     "epsilon_min": args.epsilon_min,
                     "epsilon_decay": args.epsilon_decay,
+                    "allocated_state_count": agent.state_count,
+                    "valid_state_count": agent.valid_state_count,
                 },
             ),
             args.output,

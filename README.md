@@ -75,7 +75,10 @@ final snake length across the last 50 completed episodes.
 
 The lower dashboard chart shows the full current run from episode 1 through
 the latest completed episode. It plots the all-time maximum snake length and
-the rolling-50 average final snake length.
+the rolling-50 average final snake length. For Q-learning agents, it also
+plots cumulative valid-space Q-table coverage on a percentage axis. Coverage
+is the share of logically valid state-action cells that have been updated at
+least once: 256 states for single-step and 2,048 states for two-step.
 Current-state Q-action values remain in the upper-right panel, while state
 bits, state ID, epsilon, and Q-update calculations appear below them.
 
@@ -151,6 +154,10 @@ python -m snake_ai.agents.q_learning --episodes 10000 --seed 42 --output outputs
 python -m snake_ai.agents.q_learning_two_step --episodes 15000 --seed 42 --output outputs/stats/q_learning_two_step.json
 ```
 
+Headless progress reports and the final summary display valid-space Q-table
+coverage. Metrics JSON files record the cumulative coverage after every
+episode.
+
 The runs may contain different episode counts. Each metrics file preserves its
 own episode numbers. Create a comparison figure containing all-time maximum
 and rolling-average snake-length plots:
@@ -159,8 +166,9 @@ and rolling-average snake-length plots:
 python -m snake_ai.training.compare_stats outputs/stats/q_learning.json outputs/stats/q_learning_two_step.json --output outputs/q_comparison.png
 ```
 
-The comparison plot uses a rolling average over 500 episodes by default. Use
-`--window` to choose a different averaging period.
+The comparison plot uses a rolling average over 500 episodes by default and
+includes valid-space Q-table coverage when available. Use `--window` to choose
+a different averaging period.
 
 The dashboard's `Dump Stats` button saves all completed episodes from the
 current dashboard run under `outputs/stats/`.

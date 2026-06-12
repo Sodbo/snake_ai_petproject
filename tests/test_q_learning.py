@@ -5,6 +5,7 @@ import unittest
 from snake_ai.agents.q_learning import (
     ACTION_COUNT,
     STATE_COUNT,
+    VALID_STATE_COUNT,
     QLearningAgent,
     encode_state,
     train_q_learning,
@@ -49,6 +50,7 @@ class QLearningAgentTests(unittest.TestCase):
         agent = QLearningAgent()
 
         self.assertEqual(len(agent.q_table), STATE_COUNT)
+        self.assertEqual(agent.valid_state_count, VALID_STATE_COUNT)
         self.assertEqual(len(agent.q_table[0]), ACTION_COUNT)
         self.assertTrue(all(value == 0.0 for row in agent.q_table for value in row))
 
@@ -56,6 +58,7 @@ class QLearningAgentTests(unittest.TestCase):
         agent = QLearningAgent(state_count=8)
 
         self.assertEqual(agent.state_count, 8)
+        self.assertEqual(agent.valid_state_count, 8)
         self.assertEqual(len(agent.q_table), 8)
 
     def test_terminal_update_uses_reward_as_target(self) -> None:
@@ -75,6 +78,22 @@ class QLearningAgentTests(unittest.TestCase):
 
         self.assertAlmostEqual(update.target, 13.6)
         self.assertAlmostEqual(update.new_value, 6.8)
+
+    def test_q_table_coverage_counts_unique_updated_cells(self) -> None:
+        agent = QLearningAgent(state_count=8, valid_state_count=4)
+
+        agent.update(1, Action.LEFT, 0.0, 2, False)
+        agent.update(1, Action.LEFT, 0.0, 2, False)
+        agent.update(1, Action.RIGHT, 0.0, 2, False)
+        agent.finish_episode()
+
+        self.assertAlmostEqual(agent.q_table_coverage, 2 / 12 * 100)
+        self.assertEqual(agent.updated_pair_count, 2)
+        self.assertEqual(agent.coverage_history, [agent.q_table_coverage])
+
+    def test_valid_state_count_must_fit_allocated_table(self) -> None:
+        with self.assertRaises(ValueError):
+            QLearningAgent(state_count=8, valid_state_count=9)
 
     def test_epsilon_greedy_can_exploit_and_decay(self) -> None:
         agent = QLearningAgent(

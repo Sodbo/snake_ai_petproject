@@ -42,10 +42,11 @@ def build_metrics(
     algorithm: str,
     results: Iterable[EpisodeResult],
     *,
+    q_table_coverage: Sequence[float] | None = None,
     config: Mapping[str, object] | None = None,
 ) -> MetricsData:
     """Build serializable metrics from completed training episodes."""
-    episodes = [
+    episodes: list[dict[str, int | float]] = [
         {
             "episode": index,
             "score": result.score,
@@ -55,6 +56,7 @@ def build_metrics(
         }
         for index, result in enumerate(results, start=1)
     ]
+    _add_q_table_coverage(episodes, q_table_coverage)
     return {
         "algorithm": algorithm,
         "config": dict(config or {}),
@@ -66,17 +68,32 @@ def build_length_metrics(
     algorithm: str,
     lengths: Sequence[int],
     *,
+    q_table_coverage: Sequence[float] | None = None,
     config: Mapping[str, object] | None = None,
 ) -> MetricsData:
     """Build serializable metrics when only final snake lengths are available."""
+    episodes: list[dict[str, int | float]] = [
+        {"episode": index, "snake_length": length}
+        for index, length in enumerate(lengths, start=1)
+    ]
+    _add_q_table_coverage(episodes, q_table_coverage)
     return {
         "algorithm": algorithm,
         "config": dict(config or {}),
-        "episodes": [
-            {"episode": index, "snake_length": length}
-            for index, length in enumerate(lengths, start=1)
-        ],
+        "episodes": episodes,
     }
+
+
+def _add_q_table_coverage(
+    episodes: Sequence[dict[str, int | float]],
+    coverage: Sequence[float] | None,
+) -> None:
+    if coverage is None:
+        return
+    if len(coverage) != len(episodes):
+        raise ValueError("Q-table coverage must contain one value per episode")
+    for episode, value in zip(episodes, coverage):
+        episode["q_table_coverage"] = float(value)
 
 
 def save_metrics(data: MetricsData, output: str | Path) -> Path:
@@ -110,7 +127,9 @@ def plot_length_comparison(
     matplotlib.use("Agg", force=True)
     import matplotlib.pyplot as plt
 
-    figure, axes = plt.subplots(2, 1, figsize=(12, 8), sharex=False)
+    figure, axes = plt.subplots(3, 1, figsize=(12, 11), sharex=False)
+    coverage_plotted = False
+    maximum_coverage = 0.0
     for data in datasets:
         algorithm = str(data["algorithm"])
         episodes = data["episodes"]
@@ -121,14 +140,39 @@ def plot_length_comparison(
         _, rolling_average = rolling_series(lengths, window=window)
         axes[0].plot(x_values, running_maximum(lengths), label=algorithm)
         axes[1].plot(x_values, rolling_average, label=algorithm)
+        coverage = [
+            float(item["q_table_coverage"])
+            for item in episodes
+            if "q_table_coverage" in item
+        ]
+        if len(coverage) == len(episodes):
+            axes[2].plot(x_values, coverage, label=algorithm)
+            coverage_plotted = True
+            maximum_coverage = max(maximum_coverage, max(coverage))
 
     axes[0].set_title("All-Time Maximum Snake Length")
     axes[1].set_title(f"Rolling Average Snake Length (window={window})")
+    axes[2].set_title("Cumulative Valid-Space Q-Table Coverage")
+    axes[2].set_ylim(0, min(100, max(1, maximum_coverage * 1.1)))
     for axis in axes:
         axis.set_xlabel("Episode")
-        axis.set_ylabel("Snake length")
         axis.grid(True, alpha=0.3)
-        axis.legend()
+    axes[0].set_ylabel("Snake length")
+    axes[1].set_ylabel("Snake length")
+    axes[2].set_ylabel("Coverage (%)")
+    axes[0].legend()
+    axes[1].legend()
+    if coverage_plotted:
+        axes[2].legend()
+    else:
+        axes[2].text(
+            0.5,
+            0.5,
+            "No Q-table coverage data in these metrics files",
+            ha="center",
+            va="center",
+            transform=axes[2].transAxes,
+        )
     figure.tight_layout()
 
     path = Path(output)
