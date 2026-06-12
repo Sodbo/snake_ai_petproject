@@ -63,3 +63,18 @@ Run the random agent and print per-episode and aggregate score statistics:
 python -m snake_ai.agents.random_agent
 python -m snake_ai.agents.random_agent --episodes 5 --width 10 --height 10 --render
 ```
+
+## Phase 3: Real-Time Visualization Dashboard
+
+The Pygame dashboard uses a minimal black game board with a green snake and
+red food. It supports manual and random agents, board-size controls, live game
+telemetry, pause/single-step execution, and speeds from `1x` through `500x`.
+
+```text
+python -m snake_ai.visualization.dashboard
+python -m snake_ai.visualization.dashboard --mode manual --width 10 --height 10
+```
+
+The right-side learning panel currently shows baseline action statistics. Its
+snapshot interface is designed for later phases to provide Q-table updates,
+neural-network signals, weight/gradient summaries, and backpropagation data.

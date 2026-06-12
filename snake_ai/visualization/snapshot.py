@@ -1,0 +1,26 @@
+"""Data passed from an agent/controller to the visualization dashboard."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Mapping
+
+from snake_ai.game import Action, GameState
+
+MetricValue = str | int | float | bool
+
+
+@dataclass(frozen=True)
+class DashboardSnapshot:
+    """Immutable state needed to draw one dashboard frame."""
+
+    game_state: GameState
+    agent_name: str
+    learning_view: str
+    episode: int
+    reward: float = 0.0
+    action: Action | None = None
+    paused: bool = True
+    speed: int = 1
+    metrics: Mapping[str, MetricValue] = field(default_factory=dict)
+
